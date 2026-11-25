@@ -16,107 +16,10 @@
 #define HIGH_BINS (BINS - LOW)
 #define BLOB_MAGIC 0x31435447u // "GTC1"
 #define BLOB_VERSION 1u
-#define NEWTON_STEPS 3
 
-// The mirror's float32 constants, bit for bit (gtcrn_mirror.py).
-static const float kLog2e = 0x1.715476p+0f;
-static const float kLn2Hi = 0x1.62e4p-1f;
-static const float kLn2Lo = 0x1.7f7d1cp-20f;
-static const float kExpLimit = 80.0f;
-static const float kMagEps = 0x1.197998p-40f;
-static const float kLnEps = 0x1.5798eep-27f;
-static const float kRecipC0 = 0x1.69696ap+1f;
-static const float kRecipC1 = 0x1.e1e1e2p+0f;
-static const float kRsqrtLow0 = 0x1.d413ccp+0f;
-static const float kRsqrtLow1 = 0x1.a82798p-1f;
-static const float kRsqrtHigh0 = 0x1.4afb0cp+0f;
-static const float kRsqrtHigh1 = 0x1.2bec32p-2f;
-static const float kTinySquare = 0x1p-100f;
-static const float kExpPoly[] = {
-    0x1.6c16c2p-10f, 0x1.111112p-7f, 0x1.555556p-5f, 0x1.555556p-3f, 0.5f, 1.0f, 1.0f};
+static const float kMagEps = 0x1.197998p-40f; // gtcrn_mirror.py's MAG_EPS, bit for bit
 
 typedef enum { ACT_NONE, ACT_PRELU, ACT_TANH } act_t;
-
-// Every small numeric step below is inlined: called at each gate, a call costs as much as the step.
-
-static inline __attribute__((always_inline)) float pow2i(int n)
-{
-    const union {
-        uint32_t u;
-        float f;
-    } v = {.u = (uint32_t)(127 + n) << 23};
-    return v.f;
-}
-
-static inline __attribute__((always_inline)) float exp32(float x)
-{
-    x = x < -kExpLimit ? -kExpLimit : (x > kExpLimit ? kExpLimit : x);
-    const float t = x * kLog2e + 0.5f;
-    int i = (int)t;
-    if ((float)i > t) { i--; }
-    const float n = (float)i;
-    const float r = fmaf(-n, kLn2Lo, fmaf(-n, kLn2Hi, x));
-    float p = kExpPoly[0];
-    for (size_t k = 1; k < sizeof(kExpPoly) / sizeof(kExpPoly[0]); k++) {
-        p = fmaf(p, r, kExpPoly[k]);
-    }
-    return p * pow2i(i);
-}
-
-// A normal v > 0 as m 2^e with m in [0.5, 1), as frexpf gives it.
-static inline __attribute__((always_inline)) float split(float v, int *e)
-{
-    union {
-        float f;
-        uint32_t u;
-    } bits = {.f = v};
-    *e = (int)((bits.u >> 23) & 0xffu) - 126;
-    bits.u = (bits.u & 0x807fffffu) | (126u << 23);
-    return bits.f;
-}
-
-static inline __attribute__((always_inline)) float recip32(float d)
-{
-    int e = 0;
-    const float m = split(d, &e);
-    float y = fmaf(-kRecipC1, m, kRecipC0);
-    for (int i = 0; i < NEWTON_STEPS; i++) {
-        y = fmaf(y, fmaf(-m, y, 1.0f), y);
-    }
-    return y * pow2i(-e);
-}
-
-static inline __attribute__((always_inline)) float rsqrt32(float v)
-{
-    int e = 0;
-    float m = split(v, &e);
-    if (e % 2 != 0) {
-        m = m * 2.0f;
-        e -= 1;
-    }
-    const bool low = m < 1.0f;
-    float y = fmaf(-(low ? kRsqrtLow1 : kRsqrtHigh1), m, low ? kRsqrtLow0 : kRsqrtHigh0);
-    const float h = 0.5f * m;
-    for (int i = 0; i < NEWTON_STEPS; i++) {
-        y = y * fmaf(-h, y * y, 1.5f);
-    }
-    return y * pow2i(-(e / 2));
-}
-
-static inline __attribute__((always_inline)) float sqrt32(float v)
-{
-    return v <= kTinySquare ? 0.0f : v * rsqrt32(v);
-}
-
-static inline __attribute__((always_inline)) float sigmoid32(float v)
-{
-    return recip32(1.0f + exp32(-v));
-}
-
-static inline __attribute__((always_inline)) float tanh32(float v)
-{
-    return 1.0f - 2.0f * recip32(exp32(2.0f * v) + 1.0f);
-}
 
 static inline __attribute__((always_inline)) float act_of(float acc, act_t act, float slope)
 {
@@ -352,152 +255,6 @@ static void deconv(const float *x, int cin, int fin, const ai_engine_gtcrn_conv_
     }
 }
 
-// Rows of one GRU's gates: out[r] = bias[r] + w[r] . v over n inputs in order, four rows at a time.
-static inline __attribute__((always_inline)) void gate_rows(const float *w, const float *bias, int rows,
-                                                            int n, const float *v, float *out)
-{
-    for (int r = 0; r < rows; r += 4) {
-        const float *w0 = w + r * n;
-        float a0 = bias[r];
-        float a1 = bias[r + 1];
-        float a2 = bias[r + 2];
-        float a3 = bias[r + 3];
-#pragma GCC unroll 16
-        for (int i = 0; i < n; i++) {
-            const float x = v[i];
-            a0 = fmaf(w0[i], x, a0);
-            a1 = fmaf(w0[n + i], x, a1);
-            a2 = fmaf(w0[2 * n + i], x, a2);
-            a3 = fmaf(w0[3 * n + i], x, a3);
-        }
-        out[r] = a0;
-        out[r + 1] = a1;
-        out[r + 2] = a2;
-        out[r + 3] = a3;
-    }
-}
-
-// count GRUs of hid units, their gate rows in gi and gh, (3 hid) apart: h' = n + z (h - n) into out, gates as
-// gru_step takes them, each kind for every GRU in one loop.
-static void gates(int count, int hid, const float *gi, const float *gh, const float *h, int h_stride,
-                  float *rz, float *n, float *out, int out_stride)
-{
-    for (int q = 0; q < count; q++) {
-        for (int j = 0; j < 2 * hid; j++) {
-            rz[q * 2 * hid + j] = sigmoid32(gi[q * 3 * hid + j] + gh[q * 3 * hid + j]);
-        }
-    }
-    for (int q = 0; q < count; q++) {
-        for (int j = 0; j < hid; j++) {
-            const int at = q * 3 * hid + 2 * hid + j;
-            n[q * hid + j] = tanh32(fmaf(rz[q * 2 * hid + j], gh[at], gi[at]));
-        }
-    }
-    for (int q = 0; q < count; q++) {
-        for (int j = 0; j < hid; j++) {
-            const float nj = n[q * hid + j];
-            out[q * out_stride + j] = fmaf(rz[q * 2 * hid + hid + j], h[q * h_stride + j] - nj, nj);
-        }
-    }
-}
-
-// Inlined at every call, whose sizes are constants, so its loops unroll.
-static inline __attribute__((always_inline)) void gru_step(const ai_engine_gtcrn_gru_t *g, int in, int hid,
-                                                           const float *x, const float *h, float *out)
-{
-    float gi[3 * 2 * HALF];
-    float gh[3 * 2 * HALF];
-    for (int r = 0; r < 3 * hid; r += 4) {
-        const float *w0 = g->wih + r * in;
-        float a0 = g->bih[r];
-        float a1 = g->bih[r + 1];
-        float a2 = g->bih[r + 2];
-        float a3 = g->bih[r + 3];
-#pragma GCC unroll 16
-        for (int i = 0; i < in; i++) {
-            const float v = x[i];
-            a0 = fmaf(w0[i], v, a0);
-            a1 = fmaf(w0[in + i], v, a1);
-            a2 = fmaf(w0[2 * in + i], v, a2);
-            a3 = fmaf(w0[3 * in + i], v, a3);
-        }
-        gi[r] = a0;
-        gi[r + 1] = a1;
-        gi[r + 2] = a2;
-        gi[r + 3] = a3;
-        const float *u0 = g->whh + r * hid;
-        float c0 = g->bhh[r];
-        float c1 = g->bhh[r + 1];
-        float c2 = g->bhh[r + 2];
-        float c3 = g->bhh[r + 3];
-#pragma GCC unroll 16
-        for (int j = 0; j < hid; j++) {
-            const float v = h[j];
-            c0 = fmaf(u0[j], v, c0);
-            c1 = fmaf(u0[hid + j], v, c1);
-            c2 = fmaf(u0[2 * hid + j], v, c2);
-            c3 = fmaf(u0[3 * hid + j], v, c3);
-        }
-        gh[r] = c0;
-        gh[r + 1] = c1;
-        gh[r + 2] = c2;
-        gh[r + 3] = c3;
-    }
-    float rz[2 * 2 * HALF];
-    float n[2 * HALF];
-    for (int j = 0; j < 2 * hid; j++) {
-        rz[j] = sigmoid32(gi[j] + gh[j]);
-    }
-    for (int j = 0; j < hid; j++) {
-        n[j] = tanh32(fmaf(rz[j], gh[2 * hid + j], gi[2 * hid + j]));
-    }
-    for (int j = 0; j < hid; j++) {
-        out[j] = fmaf(rz[hid + j], h[j] - n[j], n[j]);
-    }
-}
-
-// out_n is a multiple of 4: four outputs at a time, each summed over the inputs in order.
-static void dense(const float *w, const float *b, int in, int out_n, const float *x, float *out)
-{
-    for (int o = 0; o < out_n; o += 4) {
-        const float *w0 = w + o * in;
-        float a0 = b[o];
-        float a1 = b[o + 1];
-        float a2 = b[o + 2];
-        float a3 = b[o + 3];
-#pragma GCC unroll 16
-        for (int i = 0; i < in; i++) {
-            const float v = x[i];
-            a0 = fmaf(w0[i], v, a0);
-            a1 = fmaf(w0[in + i], v, a1);
-            a2 = fmaf(w0[2 * in + i], v, a2);
-            a3 = fmaf(w0[3 * in + i], v, a3);
-        }
-        out[o] = a0;
-        out[o + 1] = a1;
-        out[o + 2] = a2;
-        out[o + 3] = a3;
-    }
-}
-
-static void layer_norm(float *x, const float *w, const float *b, int n)
-{
-    float s = 0.0f;
-    for (int i = 0; i < n; i++) {
-        s = s + x[i];
-    }
-    const float mean = s / (float)n;
-    float v = 0.0f;
-    for (int i = 0; i < n; i++) {
-        const float d = x[i] - mean;
-        v = fmaf(d, d, v);
-    }
-    const float inv = rsqrt32(v / (float)n + kLnEps);
-    for (int i = 0; i < n; i++) {
-        x[i] = fmaf((x[i] - mean) * inv, w[i], b[i]);
-    }
-}
-
 static void sfe(const float *x, int ch, int f, float *out)
 {
     for (int c = 0; c < ch; c++) {
@@ -508,30 +265,6 @@ static void sfe(const float *x, int ch, int f, float *out)
             }
         }
     }
-}
-
-static void banded(const float *x, int ch, int fin, const int32_t *ptr, const int32_t *idx, const float *coef,
-                   int bands, int fout, float *out)
-{
-    for (int c = 0; c < ch; c++) {
-        memcpy(out + c * fout, x + c * fin, LOW * sizeof(float));
-        for (int j = 0; j < bands; j++) {
-            float a = 0.0f;
-            for (int p = ptr[j]; p < ptr[j + 1]; p++) {
-                a = fmaf(coef[p], x[c * fin + LOW + idx[p]], a);
-            }
-            out[c * fout + LOW + j] = a;
-        }
-    }
-}
-
-static float mean_square(const float *v, int n)
-{
-    float a = 0.0f;
-    for (int i = 0; i < n; i++) {
-        a = fmaf(v[i], v[i], a);
-    }
-    return a / (float)n;
 }
 
 // cache is a ring of span frames per channel, oldest at slot *head: this hop's frame goes in after the
@@ -569,79 +302,6 @@ static void run_block(const ai_engine_gtcrn_block_t *blk, ai_engine_gtcrn_state_
     }
 }
 
-static void run_dual(const ai_engine_gtcrn_dual_t *dp, ai_engine_gtcrn_state_t *st, float *inter, float *x)
-{
-    float *t = st->t;
-    float *y = st->d;
-    float *u = st->u;
-    for (int f = 0; f < F2; f++) {
-        for (int c = 0; c < CH; c++) {
-            t[f * CH + c] = x[c * F2 + f];
-        }
-    }
-    const int quarter = HALF / 2;
-    const int rows4 = 3 * quarter;
-    float *gi = st->gi;
-    for (int f = 0; f < F2; f++) {
-        for (int s = 0; s < 4; s++) {
-            const int g = s >> 1;
-            const int dir = s & 1;
-            gate_rows(dp->intra[g][dir].wih, dp->intra[g][dir].bih, rows4, HALF, t + f * CH + g * HALF,
-                      gi + (f * 4 + s) * rows4);
-        }
-    }
-    float h4[4 * HALF / 2] = {0};
-    float gh4[4 * 3 * HALF / 2];
-    float gi4[4 * 3 * HALF / 2];
-    float fresh[4 * HALF / 2];
-    for (int step = 0; step < F2; step++) {
-        for (int s = 0; s < 4; s++) {
-            const int g = s >> 1;
-            const int dir = s & 1;
-            const int f = dir == 0 ? step : F2 - 1 - step;
-            gate_rows(dp->intra[g][dir].whh, dp->intra[g][dir].bhh, rows4, quarter, h4 + s * quarter,
-                      gh4 + s * rows4);
-            memcpy(gi4 + s * rows4, gi + (f * 4 + s) * rows4, rows4 * sizeof(float));
-        }
-        gates(4, quarter, gi4, gh4, h4, quarter, st->rz, st->nn, fresh, quarter);
-        memcpy(h4, fresh, sizeof(h4));
-        for (int s = 0; s < 4; s++) {
-            const int g = s >> 1;
-            const int dir = s & 1;
-            const int f = dir == 0 ? step : F2 - 1 - step;
-            memcpy(y + f * CH + g * HALF + dir * quarter, h4 + s * quarter, quarter * sizeof(float));
-        }
-    }
-    for (int f = 0; f < F2; f++) {
-        dense(dp->intra_fc_w, dp->intra_fc_b, CH, CH, y + f * CH, u + f * CH);
-    }
-    layer_norm(u, dp->intra_ln_w, dp->intra_ln_b, PLANE);
-    for (int i = 0; i < PLANE; i++) {
-        t[i] = t[i] + u[i];
-    }
-    const int rows8 = 3 * HALF;
-    float *gh = st->gh;
-    for (int f = 0; f < F2; f++) {
-        for (int g = 0; g < 2; g++) {
-            const int q = f * 2 + g;
-            gate_rows(dp->inter[g].wih, dp->inter[g].bih, rows8, HALF, t + f * CH + g * HALF, gi + q * rows8);
-            gate_rows(dp->inter[g].whh, dp->inter[g].bhh, rows8, HALF, inter + f * CH + g * HALF,
-                      gh + q * rows8);
-        }
-    }
-    gates(2 * F2, HALF, gi, gh, inter, HALF, st->rz, st->nn, st->hn, HALF);
-    memcpy(inter, st->hn, PLANE * sizeof(float));
-    for (int f = 0; f < F2; f++) {
-        dense(dp->inter_fc_w, dp->inter_fc_b, CH, CH, st->hn + f * CH, u + f * CH);
-    }
-    layer_norm(u, dp->inter_ln_w, dp->inter_ln_b, PLANE);
-    for (int f = 0; f < F2; f++) {
-        for (int c = 0; c < CH; c++) {
-            x[c * F2 + f] = t[f * CH + c] + u[f * CH + c];
-        }
-    }
-}
-
 static void add(const float *a, const float *b, float *out, int n)
 {
     for (int i = 0; i < n; i++) {
@@ -667,7 +327,7 @@ void ai_engine_gtcrn_step(const ai_engine_gtcrn_weights_t *w, ai_engine_gtcrn_st
         st->x[BINS + i] = re;
         st->x[2 * BINS + i] = im;
     }
-    banded(st->x, 3, BINS, w->erb_ptr, w->erb_idx, w->erb_coef, ERB_BANDS, ERB, st->e);
+    banded(st->x, 3, BINS, LOW, w->erb_ptr, w->erb_idx, w->erb_coef, ERB_BANDS, ERB, st->e);
     sfe(st->e, 3, ERB, st->s);
     conv_k5s2(st->s, ERB, &w->en0, CH, 9, 1, F1, st->pad, st->o0);
     conv_k5s2(st->o0, F1, &w->en1, CH, HALF, 2, F2, st->pad, st->o1);
@@ -679,8 +339,16 @@ void ai_engine_gtcrn_step(const ai_engine_gtcrn_weights_t *w, ai_engine_gtcrn_st
         in = st->skip[k];
     }
     memcpy(st->y, in, PLANE * sizeof(float));
+    const ns_float_dual_work_t work = {.t = st->t,
+                                       .y = st->d,
+                                       .u = st->u,
+                                       .hn = st->hn,
+                                       .gi = st->gi,
+                                       .gh = st->gh,
+                                       .rz = st->rz,
+                                       .nn = st->nn};
     for (int k = 0; k < 2; k++) {
-        run_dual(&w->dual[k], st, st->inter[k], st->y);
+        run_dual(&w->dual[k], &work, st->inter[k], st->y);
     }
     for (int k = 0; k < AI_ENGINE_GTCRN_BLOCKS; k++) {
         add(st->y, st->skip[AI_ENGINE_GTCRN_BLOCKS - 1 - k], st->in, PLANE);
@@ -692,7 +360,7 @@ void ai_engine_gtcrn_step(const ai_engine_gtcrn_weights_t *w, ai_engine_gtcrn_st
     deconv(st->in, CH, F2, &w->de3, HALF, 2, F1, ACT_PRELU, st->m1);
     add(st->m1, st->o0, st->m1, CH * F1);
     deconv(st->m1, CH, F1, &w->de4, 2, 1, ERB, ACT_TANH, st->m2);
-    banded(st->m2, 2, ERB, w->ierb_ptr, w->ierb_idx, w->ierb_coef, HIGH_BINS, BINS, st->mask);
+    banded(st->m2, 2, ERB, LOW, w->ierb_ptr, w->ierb_idx, w->ierb_coef, HIGH_BINS, BINS, st->mask);
     for (int i = 0; i < BINS; i++) {
         const float mr = st->mask[i];
         const float mi = st->mask[BINS + i];
@@ -701,86 +369,39 @@ void ai_engine_gtcrn_step(const ai_engine_gtcrn_weights_t *w, ai_engine_gtcrn_st
     }
 }
 
-typedef struct {
-    const uint8_t *p;
-    const uint8_t *end;
-    bool ok;
-} cursor_t;
-
-static const void *take(cursor_t *c, size_t count)
+static ai_engine_gtcrn_conv_t take_conv(ns_float_cursor_t *c, size_t weights, size_t outs, bool slope)
 {
-    const size_t bytes = count * sizeof(float);
-    if (!c->ok || (size_t)(c->end - c->p) < bytes) {
-        c->ok = false;
-        return NULL;
-    }
-    const void *at = c->p;
-    c->p += bytes;
-    return at;
-}
-
-static ai_engine_gtcrn_conv_t take_conv(cursor_t *c, size_t weights, size_t outs, bool slope)
-{
-    ai_engine_gtcrn_conv_t v = {.w = take(c, weights), .b = take(c, outs), .slope = 0.0f};
-    const float *s = slope ? take(c, 1) : NULL;
+    ai_engine_gtcrn_conv_t v = {.w = ns_float_take(c, weights), .b = ns_float_take(c, outs), .slope = 0.0f};
+    const float *s = slope ? ns_float_take(c, 1) : NULL;
     v.slope = s != NULL ? *s : 0.0f;
     return v;
 }
 
-static ai_engine_gtcrn_gru_t take_gru(cursor_t *c, int in, int hid)
-{
-    return (ai_engine_gtcrn_gru_t){.wih = take(c, (size_t)3 * hid * in),
-                                   .whh = take(c, (size_t)3 * hid * hid),
-                                   .bih = take(c, (size_t)3 * hid),
-                                   .bhh = take(c, (size_t)3 * hid)};
-}
-
-static ai_engine_gtcrn_block_t take_block(cursor_t *c, int dil)
+static ai_engine_gtcrn_block_t take_block(ns_float_cursor_t *c, int dil)
 {
     ai_engine_gtcrn_block_t b = {.dil = dil};
     b.pc1 = take_conv(c, (size_t)CH * 3 * HALF, CH, true);
     b.dw = take_conv(c, (size_t)CH * 9, CH, true);
     b.pc2 = take_conv(c, (size_t)HALF * CH, HALF, false);
-    b.att = take_gru(c, HALF, 2 * HALF);
-    b.att_w = take(c, (size_t)HALF * 2 * HALF);
-    b.att_b = take(c, HALF);
+    b.att = ns_float_take_gru(c, HALF, 2 * HALF);
+    b.att_w = ns_float_take(c, (size_t)HALF * 2 * HALF);
+    b.att_b = ns_float_take(c, HALF);
     return b;
-}
-
-static ai_engine_gtcrn_dual_t take_dual(cursor_t *c)
-{
-    ai_engine_gtcrn_dual_t d;
-    for (int g = 0; g < 2; g++) {
-        d.intra[g][0] = take_gru(c, HALF, HALF / 2);
-        d.intra[g][1] = take_gru(c, HALF, HALF / 2);
-    }
-    d.intra_fc_w = take(c, CH * CH);
-    d.intra_fc_b = take(c, CH);
-    d.intra_ln_w = take(c, PLANE);
-    d.intra_ln_b = take(c, PLANE);
-    for (int g = 0; g < 2; g++) {
-        d.inter[g] = take_gru(c, HALF, HALF);
-    }
-    d.inter_fc_w = take(c, CH * CH);
-    d.inter_fc_b = take(c, CH);
-    d.inter_ln_w = take(c, PLANE);
-    d.inter_ln_b = take(c, PLANE);
-    return d;
 }
 
 esp_err_t ai_engine_gtcrn_weights(const void *blob, size_t bytes, ai_engine_gtcrn_weights_t *w)
 {
     if (blob == NULL || w == NULL || ((uintptr_t)blob & 3u) != 0) { return ESP_ERR_INVALID_ARG; }
-    cursor_t c = {.p = blob, .end = (const uint8_t *)blob + bytes, .ok = true};
-    const uint32_t *head = take(&c, 4);
+    ns_float_cursor_t c = {.p = blob, .end = (const uint8_t *)blob + bytes, .ok = true};
+    const uint32_t *head = ns_float_take(&c, 4);
     if (head == NULL) { return ESP_ERR_INVALID_SIZE; }
     if (head[0] != BLOB_MAGIC || head[1] != BLOB_VERSION) { return ESP_ERR_INVALID_VERSION; }
-    w->erb_ptr = take(&c, ERB_BANDS + 1);
-    w->erb_idx = take(&c, head[2]);
-    w->erb_coef = take(&c, head[2]);
-    w->ierb_ptr = take(&c, HIGH_BINS + 1);
-    w->ierb_idx = take(&c, head[3]);
-    w->ierb_coef = take(&c, head[3]);
+    w->erb_ptr = ns_float_take(&c, ERB_BANDS + 1);
+    w->erb_idx = ns_float_take(&c, head[2]);
+    w->erb_coef = ns_float_take(&c, head[2]);
+    w->ierb_ptr = ns_float_take(&c, HIGH_BINS + 1);
+    w->ierb_idx = ns_float_take(&c, head[3]);
+    w->ierb_coef = ns_float_take(&c, head[3]);
     w->en0 = take_conv(&c, (size_t)CH * 9 * 5, CH, true);
     w->en1 = take_conv(&c, (size_t)CH * HALF * 5, CH, true);
     static const int kDil[AI_ENGINE_GTCRN_BLOCKS] = {1, 2, 5};
@@ -788,7 +409,7 @@ esp_err_t ai_engine_gtcrn_weights(const void *blob, size_t bytes, ai_engine_gtcr
         w->enc[k] = take_block(&c, kDil[k]);
     }
     for (int k = 0; k < 2; k++) {
-        w->dual[k] = take_dual(&c);
+        w->dual[k] = ns_float_take_dual(&c);
     }
     for (int k = 0; k < AI_ENGINE_GTCRN_BLOCKS; k++) {
         w->dec[k] = take_block(&c, kDil[AI_ENGINE_GTCRN_BLOCKS - 1 - k]);

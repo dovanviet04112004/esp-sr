@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "ns_float/ns_float.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -30,28 +31,14 @@ typedef struct {
 } ai_engine_gtcrn_conv_t;
 
 typedef struct {
-    const float *wih; // 3 hidden rows of gates r, z, n by inputs
-    const float *whh;
-    const float *bih;
-    const float *bhh;
-} ai_engine_gtcrn_gru_t;
-
-typedef struct {
     ai_engine_gtcrn_conv_t pc1;
     ai_engine_gtcrn_conv_t dw;
     ai_engine_gtcrn_conv_t pc2;
-    ai_engine_gtcrn_gru_t att;
+    ns_float_gru_t att;
     const float *att_w;
     const float *att_b;
     int dil;
 } ai_engine_gtcrn_block_t;
-
-typedef struct {
-    ai_engine_gtcrn_gru_t intra[2][2]; // [group][forward, backward]
-    ai_engine_gtcrn_gru_t inter[2];
-    const float *intra_fc_w, *intra_fc_b, *intra_ln_w, *intra_ln_b;
-    const float *inter_fc_w, *inter_fc_b, *inter_ln_w, *inter_ln_b;
-} ai_engine_gtcrn_dual_t;
 
 typedef struct {
     const int32_t *erb_ptr, *erb_idx;
@@ -60,7 +47,7 @@ typedef struct {
     const float *ierb_coef;
     ai_engine_gtcrn_conv_t en0, en1;
     ai_engine_gtcrn_block_t enc[AI_ENGINE_GTCRN_BLOCKS];
-    ai_engine_gtcrn_dual_t dual[2];
+    ns_float_dual_t dual[2];
     ai_engine_gtcrn_block_t dec[AI_ENGINE_GTCRN_BLOCKS];
     ai_engine_gtcrn_conv_t de3, de4;
 } ai_engine_gtcrn_weights_t;
