@@ -657,3 +657,38 @@ Từ chối, trên bản không `NS` (mạng vắng): `1` → `CONFIG_REFUSED`, 
 - `SET_CONFIG` ghi NVS: gửi `1` rồi reset board, dòng khởi động là `afe: ns net (afe/ns_engine 1, net built)`; gửi lại `0`.
 - "Đổi không mất khung" chưa kiểm được trên S3: mạng tự bỏ khung vì quá nhịp, che mất phần do đổi gây ra. Kiểm ở board có
   mạng vừa nhịp (S31-T9 của fork `esp-sr-s31`).
+
+### 10.8 Sigmoid và tanh bốn làn một lượt, cả hai mạng (25/11, E9-T16, E9-T20)
+
+Bài đo riêng trên board B, 1 024 giá trị trong RAM trong, mỗi biến thể lấy lượt nhanh nhất trong 8 lượt; "khớp" là so từng
+bit với bản đang dùng trên 204 800 giá trị trong [−90, 90]:
+
+| Biến thể | Chu kỳ mỗi sigmoid | Khớp |
+|---|---|---|
+| bản đang dùng, inline, một giá trị một lượt | 141 | — |
+| vòng đa thức và vòng Newton duỗi ra | 112 | có |
+| thêm `floor.s`, chuyển bit bằng `wfr`/`rfr` thay vì qua stack | 107 | có |
+| hai giá trị viết liền nhau | 105 | có |
+| bốn làn viết xen theo từng bước, C thuần | 86,5 | có |
+| bốn làn xen, thêm `floor.s`, `wfr`, `rfr` | 74,8 | có |
+| bốn làn xen, bật `-fschedule-insns -fsched-pressure` | 97,0 | có |
+| phép chia IEEE bằng `div0.s` … `divn.s` thay vì Newton | 101 | không: 41–150 lệch, ≤ 1 ulp |
+
+- `madd.s` có độ trễ 4 chu kỳ, thông lượng 1 lệnh mỗi chu kỳ: chuỗi phụ thuộc đo 4,2–4,4 chu kỳ mỗi lệnh, bốn tổng độc lập
+  1,01. Một sigmoid là chuỗi ~25 bước nối nhau, nên chỉ xen nhiều giá trị mới lấp được độ trễ.
+- GCC không tự xen hai lời gọi inline cạnh nhau, và bộ xếp lệnh của nó làm chậm đi: các làn phải viết xen theo từng bước.
+
+Đưa vào `ns_float.h`: `sigmoid_n`, `tanh_n` chạy bốn làn C thuần, phần lẻ chạy hàm một giá trị; cổng GRU, chú ý và mặt nạ
+tính đối số vào mảng rồi gọi chúng; vòng đa thức và Newton duỗi ra. Bước `1 − 2y` của tanh phải nằm trong làn: tách ra
+thành vòng riêng sau bốn làn chậm thêm ~100 µs mỗi bước. Không đổi phép tính nào, nên bản soi gương và golden giữ nguyên. Máy
+tính: hai bài `ns_host` và `make parity-host` khớp từng bit, đối chứng âm vẫn đỏ. `make ai-unit-gtcrn`, `make ai-unit-ulunas`
+trên board B, 200 bước sau 20 bước khởi động, golden 40/40 bước khớp:
+
+| Mạng | Trước, RAM trong | Sau, RAM trong | Trước, PSRAM | Sau, PSRAM |
+|---|---|---|---|---|
+| GTCRN | 12 391 µs | 10 794 µs | 13 840 µs | 12 283 µs |
+| UL-UNAS | 24 180 µs (board C) | 21 326 µs | 27 447 µs (board C) | 24 611 µs |
+
+- Mốc của GTCRN đo lại trên board B: 12 391 / 13 840 µs, khớp board C (§10.4) trong 5 µs; UL-UNAS lấy mốc của board C.
+- Phần còn lại: nhân ma trận–vector 2,25 chu kỳ mỗi phép nhân-cộng (5 lệnh nạp, 4 `madd.s` cho 4 hàng); GRU thời gian của
+  UL-UNAS chờ PSRAM (§10.6).
