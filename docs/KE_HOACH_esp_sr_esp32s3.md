@@ -961,8 +961,11 @@ xác nhận. ADR ghi bảng ba cột, và bản được giữ thành mặc đ�
 sàn như khe của firmware. `SRPIPE_NS=gtcrn` trên môi trường của lệnh, không ở `.env`, như `SRPIPE_CHIP`, cắm GTCRN chạy
 dòng vào mọi chuỗi mà `device.listen` dựng (`tasks/ns/gtcrn.py`): các file chạy dòng ở commit ghim, nạp checkpoint DNS3
 chính thức; gain là tỉ số biên độ giữa lối ra của mạng và vạch vào. `wake-board` và `command-eval` nhờ thế chấm cùng phiên
-board, một lần với sàn và một lần với GTCRN, bằng thước của §3.15. Trên các phiên yên hiện có GTCRN thua sàn, vì
-checkpoint khử cả vang (`measurements/afe/ns.md` §10).
+board, một lần với sàn và một lần với GTCRN, bằng thước của §3.15. Bản dựng ở `processed/` chạy với `SRPIPE_NS` ghi động
+cơ ấy vào `build.yaml` và manifest, và chỉ được coi là đã dựng cho đúng động cơ ấy; bản không ghi là của sàn. Phiên bản
+split dựng cho một động cơ mang tên động cơ, file split chép nguyên từ phiên bản gốc (`wake/vung1_gtcrn` của
+`wake/vung1`), như phiên bản của chip khác (§3.14): bản dựng của động cơ này không bao giờ chạy tiếp, ghi đè hay đứng thay
+bản của động cơ kia. Trên các phiên yên hiện có GTCRN thua sàn, vì checkpoint khử cả vang (`measurements/afe/ns.md` §10).
 
 Chủ repo vẫn đưa GTCRN lên chip (22/11). Không bản lượng tử nào của esp-dl giữ được gain khi không học lại: lệch
 7,6–47 dB (`ns.md` §10.3). Vì vậy `ai_engine/src/ns_gtcrn/` là GTCRN chạy dòng viết tay bằng C float32, trọng số float32
