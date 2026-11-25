@@ -218,3 +218,19 @@ def test_a_flipped_byte_no_longer_matches_its_sha256() -> None:
 def test_bad_entries_are_refused(entries) -> None:
     with pytest.raises(ValueError):
         pack_models.pack(entries)
+
+
+def test_the_ns_row_goes_in_only_for_the_net_the_build_carries(tmp_path, monkeypatch) -> None:
+    (tmp_path / "ns").mkdir()
+    (tmp_path / "ns" / "ns_ulunas.bin").write_bytes(b"w")
+    files = [
+        {"file": "ns_ulunas.bin", "entry": "ns_ulunas", "kind": "weights", "sha256": hashlib.sha256(b"w").hexdigest()}
+    ]
+    lock = tmp_path / "models.lock.json"
+    monkeypatch.setattr(pack_models, "LOCK", lock)
+    monkeypatch.setattr(pack_models, "MODELS", tmp_path)
+    lock.write_text(json.dumps({"models": {"ns": {"files": files, "backend": "ulunas"}}}), encoding="utf-8")
+    assert pack_models.locked().entries == []
+    assert [(e.name, e.kind) for e in pack_models.locked(ns="ulunas").entries] == [("ns_ulunas", "weights")]
+    with pytest.raises(ValueError, match="carries the ns net gtcrn"):
+        pack_models.locked(ns="gtcrn")

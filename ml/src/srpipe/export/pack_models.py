@@ -47,6 +47,7 @@ MAX_ENTRIES = storage_define("STORAGE_MODEL_MAX_ENTRIES")
 NAME_BYTES = storage_define("STORAGE_MODEL_NAME_BYTES")
 HEADER_BYTES = storage_define("STORAGE_MODEL_HEADER_BYTES")
 ALIGN_BYTES = storage_define("STORAGE_MODEL_ALIGN_BYTES")
+NS_BRANCH = "ns"  # its row goes in only for the net the build carries
 SHA256_BYTES = storage_define("STORAGE_MODEL_SHA256_BYTES")
 KINDS = {
     kind: storage_define(f"STORAGE_MODEL_KIND_{kind.upper()}")
@@ -181,18 +182,21 @@ def pack(
     return image
 
 
-def locked(skip: tuple[str, ...] = ()) -> Locked:
-    """Every file models.lock.json lists for models_0, but the branches of skip, in order as the image entry it names,
-    graphs flagged to stay in flash when deployed so; the listen hash and delta1..3, the speaker's hash, thresholds,
-    cohort top and noise fields, the wake's threshold and smoothing hops, each 0 without its row. Refused when a file
-    differs from its sha256, rows learned on two listen.yaml, two record thresholds, a speaker or a wake, the
-    speaker's row lacks SPEAKERS thresholds or a cohort top or holds noise fields checked_noise refuses, or the
-    wake's lacks its threshold or hops."""
+def locked(skip: tuple[str, ...] = (), ns: str | None = None) -> Locked:
+    """Every file models.lock.json lists for models_0 but skip's branches, and the ns row only when ns names its net
+    (KEHOACH 6.3), as image entries, graphs flagged to stay in flash when deployed so; the listen hash, delta1..3, the
+    speaker's hash, thresholds, cohort top and noise fields, the wake's threshold and hops, each 0 without its row.
+    Refused when a file differs from its sha256, rows learned on two listen.yaml, two record thresholds, a speaker or a
+    wake, the speaker's row lacks SPEAKERS thresholds or a cohort top or holds noise fields checked_noise refuses, the
+    wake's lacks its threshold or hops, or the ns row locks another net than ns."""
     rows = {
         b: r
         for b, r in json.loads(LOCK.read_text(encoding="utf-8"))["models"].items()
-        if b not in skip and r.get("slot", SLOT) == SLOT
+        if b not in skip and r.get("slot", SLOT) == SLOT and (b != NS_BRANCH or ns is not None)
     }
+    if ns is not None and rows.get(NS_BRANCH, {}).get("backend") != ns:
+        held = rows.get(NS_BRANCH, {}).get("backend", "no net")
+        raise ValueError(f"the build carries the ns net {ns}, {LOCK.name} locks {held}")
     entries = []
     for branch, row in rows.items():
         for f in row["files"]:
@@ -258,10 +262,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("entries", nargs="*", help="<name>:<espdl|norm|units>:<file>; no listen hash, so no command")
     parser.add_argument("--lock", action="store_true", help="pack every file of contracts/models.lock.json")
     parser.add_argument("--skip", action="append", default=[], metavar="BRANCH", help="with --lock, leave it out")
+    parser.add_argument("--ns", help="with --lock, the ns net the build carries: its locked row goes in, else none")
     args = parser.parse_args(argv)
     if args.lock == bool(args.entries):
         parser.error("give either --lock or entries")
-    lock = locked(tuple(args.skip)) if args.lock else Locked([])
+    lock = locked(tuple(args.skip), args.ns) if args.lock else Locked([])
     entries = list(lock.entries)
     for spec in args.entries:
         name, kind, path = spec.split(":", 2)

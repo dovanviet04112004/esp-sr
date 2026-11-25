@@ -47,10 +47,15 @@ SECRETS := $(if $(wildcard firmware/sdkconfig.secrets),;sdkconfig.secrets)
 IDF_DEV = idf.py -D SDKCONFIG_DEFAULTS="$(SDKCONFIG_BASE);sdkconfig.dev$(SECRETS)"
 # MICS=1 builds the one-microphone board in a folder of its own, sdkconfig.mic1 last (ADR-0042, KEHOACH 4.5.8);
 # BOARD=C builds board C the same way, sdkconfig.board_c last (KEHOACH 2.1).
-BENCH_BUILD := build_bench$(if $(filter 1,$(MICS)),_mic1)$(if $(filter C,$(BOARD)),_c)
+# NS=gtcrn or NS=ulunas builds that ns net in, in a folder of its own, from a layer make writes there (KEHOACH 4.5.8).
+NS_NETS := gtcrn ulunas
+$(if $(NS),$(if $(filter $(NS),$(NS_NETS)),,$(error NS=$(NS) is none of $(NS_NETS))))
+BENCH_BUILD := build_bench$(if $(filter 1,$(MICS)),_mic1)$(if $(filter C,$(BOARD)),_c)$(if $(NS),_ns$(NS))
 BENCH_LAYER := $(if $(filter C,$(BOARD)),sdkconfig.board_c,$(if $(filter 1,$(MICS)),sdkconfig.mic1))
+NS_LAYER := $(if $(NS),$(BENCH_BUILD)/sdkconfig.ns)
+NS_LINE := $(if $(NS),CONFIG_AI_ENGINE_NS_BACKEND_$(shell echo $(NS) | tr a-z A-Z)=y)
 IDF_BENCH = idf.py -B $(BENCH_BUILD) -D SDKCONFIG=$(BENCH_BUILD)/sdkconfig \
-  -D SDKCONFIG_DEFAULTS="$(SDKCONFIG_BASE);sdkconfig.bench$(SECRETS)$(if $(BENCH_LAYER),;$(BENCH_LAYER))"
+  -D SDKCONFIG_DEFAULTS="$(SDKCONFIG_BASE);sdkconfig.bench$(SECRETS)$(if $(BENCH_LAYER),;$(BENCH_LAYER))$(if $(NS),;$(NS_LAYER))"
 FW_DEFAULTS := firmware/sdkconfig.defaults firmware/sdkconfig.defaults.esp32s3 firmware/sdkconfig.afe \
                firmware/CMakeLists.txt $(wildcard firmware/sdkconfig.secrets) \
                $(wildcard firmware/components/*/Kconfig) firmware/main/Kconfig.projbuild
@@ -504,9 +509,11 @@ fw-dev: ## Build the dev profile
 	@$(call fresh_sdkconfig,firmware/sdkconfig,$(FW_DEFAULTS) firmware/sdkconfig.dev)
 	cd firmware && $(IDF_DEV) build
 
-fw-bench: ## Build the bench profile, the only one numbers are reported from [MICS=1: one microphone] [BOARD=C]
+fw-bench: ## Build the bench profile, the only one numbers are reported from [MICS=1: one microphone] [BOARD=C] [NS=gtcrn|ulunas]
+	$(if $(NS),@mkdir -p firmware/$(BENCH_BUILD) && [ "$$(cat firmware/$(NS_LAYER) 2>/dev/null)" = "$(NS_LINE)" ] \
+	  || echo "$(NS_LINE)" > firmware/$(NS_LAYER))
 	@$(call fresh_sdkconfig,firmware/$(BENCH_BUILD)/sdkconfig,$(FW_DEFAULTS) firmware/sdkconfig.bench \
-	  $(addprefix firmware/,$(BENCH_LAYER)))
+	  $(addprefix firmware/,$(BENCH_LAYER) $(NS_LAYER)))
 	cd firmware && $(IDF_BENCH) build
 
 # A test app leaves its own partition table on the board, so the product's goes back with the app, all in one esptool
@@ -575,8 +582,8 @@ wifi-point: ## After the PC's address changed: keep the board's stored network, 
 	@docker ps --filter name=sr-emqx --filter status=running -q | grep -q . || $(MAKE) --no-print-directory broker-up
 	cd host && uv run python -m srhost.wifi --port "$(PORT)" --point
 
-models-flash: ## Pack every model of contracts/models.lock.json and write models_0 of board B (KEHOACH 4.5.6, 6.1)
-	cd ml && PORT=$(PORT) BAUD=$(FLASH_BAUD) AFTER=$(AFTER) ./scripts/50_pack_and_flash.sh
+models-flash: ## Pack every model of contracts/models.lock.json and write models_0 of board B (KEHOACH 4.5.6, 6.1) [NS=gtcrn|ulunas]
+	cd ml && PORT=$(PORT) BAUD=$(FLASH_BAUD) AFTER=$(AFTER) NS=$(NS) ./scripts/50_pack_and_flash.sh
 
 PRODUCT_PARTS = python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) --baud $(FLASH_BAUD) \
   --partition-table-file firmware/partitions.csv
@@ -607,11 +614,11 @@ LOADER_ATTEMPTS := 120
 # The running app's log ends one esptool's wait as serial noise, so the wait for the button is a loop of them.
 LOADER_TRIES := 300
 BOARD_C_LOADER := hold the button, power-cycle the board, wait 2 s, release (KEHOACH 2.1)
-product: ## Put the product back on board B after test apps: models, storage, then firmware, and show its boot [SPEAKER=b0|b3] [MICS=1] [BOARD=C]
+product: ## Put the product back on board B after test apps: models, storage, then firmware, and show its boot [SPEAKER=b0|b3] [MICS=1] [BOARD=C] [NS=gtcrn|ulunas]
 	$(if $(SPEAKER),$(MAKE) --no-print-directory speaker-use SPEAKER=$(SPEAKER))
 ifeq ($(BOARD),C)
 	$(MAKE) --no-print-directory fw-bench
-	$(ML) python -m srpipe.export.pack_models artifacts/models.bin --lock
+	$(ML) python -m srpipe.export.pack_models artifacts/models.bin --lock $(if $(NS),--ns $(NS))
 	$(DETECT).pack $(VISION_DIR)
 	@echo "hold the button, power-cycle the board, wait 2 s, release (KEHOACH 2.1)"
 	models=$$($(PRODUCT_PARTS) get_partition_info --partition-name models_0 --info offset); \
@@ -903,7 +910,7 @@ listen-unit: ## Run svc_listen on board B over every Gate 3 session, round by ro
 
 ##@ Broker and host
 
-.PHONY: broker-up broker-down host-live detect journal commands speakers speaker-enrol speaker-name speaker-forget
+.PHONY: broker-up broker-down host-live detect journal commands settings speakers speaker-enrol speaker-name speaker-forget
 broker-up: ## Start the bench MQTT broker (needs deploy/.env and deploy/emqx/users.csv)
 	@test -f deploy/.env || { echo "copy deploy/.env.example to deploy/.env and fill it"; exit 1; }
 	@test -f deploy/emqx/users.csv || { echo "copy deploy/emqx/users.csv.example to deploy/emqx/users.csv and fill it"; exit 1; }
@@ -926,6 +933,9 @@ vision-live: ## Board C's preview on a local page, with a sharpness figure for s
 
 commands: ## Send a command set to one board, retained, and show its answer: DEVICE=<deviceId> SET=<file.json> [CLEAR=1]
 	cd host && uv run python -m srhost.commands --device "$(DEVICE)" $(if $(CLEAR),--clear,"$(abspath $(SET))")
+
+settings: ## Send SET_CONFIG to one board and show its answer: DEVICE=<deviceId> KEY=afe/ns_engine VALUE=<0|1> (KEHOACH 7.3)
+	cd host && uv run python -m srhost.settings --device "$(DEVICE)" --key "$(KEY)" --value "$(VALUE)"
 
 speakers: ## Send a speaker roster to one board, retained, and show what it keeps: DEVICE=<deviceId> SET=<roster.json> | LIST=1 | CLEAR=1 (E11-T31)
 	cd host && uv run python -m srhost.speakers --device "$(DEVICE)" \
