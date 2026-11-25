@@ -384,11 +384,10 @@ static void run_tfa(const ai_engine_ulunas_tfa_t *t, float *x, int ch, int width
     for (int p = 0; p < chunks; p++) {
         dense(t->fa_fc_w, t->fa_fc_b, 2 * CHUNK, CHUNK, st->both + p * 2 * CHUNK, st->af + p * CHUNK);
     }
-    for (int f = 0; f < width; f++) {
-        st->af[f] = sigmoid32(st->af[f]);
-    }
+    sigmoid_n(st->af, width);
+    sigmoid_n(at, ch);
     for (int c = 0; c < ch; c++) {
-        const float sc = sigmoid32(at[c]);
+        const float sc = at[c];
         for (int f = 0; f < width; f++) {
             x[c * width + f] = (sc * x[c * width + f]) * st->af[f];
         }
@@ -459,9 +458,8 @@ void ai_engine_ulunas_step(const ai_engine_ulunas_weights_t *w, ai_engine_ulunas
         }
         run_unit(u, &w->dec[k], st, st->in, st->y);
     }
-    for (int f = 0; f < ERB; f++) {
-        st->m[f] = sigmoid32(st->y[f]);
-    }
+    memcpy(st->m, st->y, sizeof(st->m));
+    sigmoid_n(st->m, ERB);
     banded(st->m, 1, ERB, LOW, w->ierb_ptr, w->ierb_idx, w->ierb_coef, HIGH_BINS, BINS, st->mask);
     for (int i = 0; i < BINS; i++) {
         gain[i] = st->mask[i] < 1.0f ? st->mask[i] : 1.0f;

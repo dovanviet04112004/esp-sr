@@ -294,8 +294,9 @@ static void run_block(const ai_engine_gtcrn_block_t *blk, ai_engine_gtcrn_state_
     gru_step(&blk->att, HALF, 2 * HALF, z, tra, fresh);
     memcpy(tra, fresh, sizeof(fresh));
     dense(blk->att_w, blk->att_b, 2 * HALF, HALF, tra, at);
+    sigmoid_n(at, HALF);
     for (int c = 0; c < HALF; c++) {
-        const float a = sigmoid32(at[c]);
+        const float a = at[c];
         for (int i = 0; i < F2; i++) {
             out[2 * c * F2 + i] = y[c * F2 + i] * a;
             out[(2 * c + 1) * F2 + i] = x[(HALF + c) * F2 + i];

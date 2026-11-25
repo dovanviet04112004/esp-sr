@@ -50,6 +50,7 @@ static inline __attribute__((always_inline)) float exp32(float x)
     const float n = (float)i;
     const float r = fmaf(-n, kNsfLn2Lo, fmaf(-n, kNsfLn2Hi, x));
     float p = kNsfExpPoly[0];
+#pragma GCC unroll 8
     for (size_t k = 1; k < sizeof(kNsfExpPoly) / sizeof(kNsfExpPoly[0]); k++) {
         p = fmaf(p, r, kNsfExpPoly[k]);
     }
@@ -73,6 +74,7 @@ static inline __attribute__((always_inline)) float recip32(float d)
     int e = 0;
     const float m = split(d, &e);
     float y = fmaf(-kNsfRecipC1, m, kNsfRecipC0);
+#pragma GCC unroll 4
     for (int i = 0; i < NS_FLOAT_NEWTON_STEPS; i++) {
         y = fmaf(y, fmaf(-m, y, 1.0f), y);
     }
@@ -90,6 +92,7 @@ static inline __attribute__((always_inline)) float rsqrt32(float v)
     const bool low = m < 1.0f;
     float y = fmaf(-(low ? kNsfRsqrtLow1 : kNsfRsqrtHigh1), m, low ? kNsfRsqrtLow0 : kNsfRsqrtHigh0);
     const float h = 0.5f * m;
+#pragma GCC unroll 4
     for (int i = 0; i < NS_FLOAT_NEWTON_STEPS; i++) {
         y = y * fmaf(-h, y * y, 1.5f);
     }
@@ -109,6 +112,80 @@ static inline __attribute__((always_inline)) float sigmoid32(float v)
 static inline __attribute__((always_inline)) float tanh32(float v)
 {
     return 1.0f - 2.0f * recip32(exp32(2.0f * v) + 1.0f);
+}
+
+// Four lanes of exp32 then recip32, step by step: GCC keeps this order, and only interleaved lanes hide the
+// FPU's 4-cycle latency (afe/ns.md 10.8). v[k] becomes sigmoid32(v[k]), or tanh32(v[k]) with tanh_form.
+#define NSF_LANES(step) step(0) step(1) step(2) step(3)
+#define NSF_EXP_ARG(k) float x##k = tanh_form ? 2.0f * v[k] : -v[k];
+#define NSF_EXP_CLAMP(k)                                                                                     \
+    x##k = x##k < -kNsfExpLimit ? -kNsfExpLimit : (x##k > kNsfExpLimit ? kNsfExpLimit : x##k);
+#define NSF_EXP_SPLIT(k) const float t##k = x##k * kNsfLog2e + 0.5f;
+#define NSF_EXP_FLOOR(k) int i##k = (int)t##k - ((float)(int)t##k > t##k);
+#define NSF_EXP_REDUCE(k)                                                                                    \
+    const float r##k = fmaf(-(float)i##k, kNsfLn2Lo, fmaf(-(float)i##k, kNsfLn2Hi, x##k));
+#define NSF_EXP_START(k) float p##k = kNsfExpPoly[0];
+#define NSF_EXP_POLY(k) p##k = fmaf(p##k, r##k, kNsfExpPoly[j]);
+#define NSF_RECIP_SPLIT(k)                                                                                   \
+    int s##k = 0;                                                                                            \
+    const float m##k = split(1.0f + p##k * pow2i(i##k), &s##k);
+#define NSF_RECIP_SEED(k) float y##k = fmaf(-kNsfRecipC1, m##k, kNsfRecipC0);
+#define NSF_RECIP_NEWTON(k) y##k = fmaf(y##k, fmaf(-m##k, y##k, 1.0f), y##k);
+#define NSF_RECIP_OUT(k) v[k] = tanh_form ? 1.0f - 2.0f * (y##k * pow2i(-s##k)) : y##k * pow2i(-s##k);
+
+static inline __attribute__((always_inline)) void exp_recip4(float *v, bool tanh_form)
+{
+    NSF_LANES(NSF_EXP_ARG);
+    NSF_LANES(NSF_EXP_CLAMP);
+    NSF_LANES(NSF_EXP_SPLIT);
+    NSF_LANES(NSF_EXP_FLOOR);
+    NSF_LANES(NSF_EXP_REDUCE);
+    NSF_LANES(NSF_EXP_START);
+#pragma GCC unroll 8
+    for (size_t j = 1; j < sizeof(kNsfExpPoly) / sizeof(kNsfExpPoly[0]); j++) {
+        NSF_LANES(NSF_EXP_POLY);
+    }
+    NSF_LANES(NSF_RECIP_SPLIT);
+    NSF_LANES(NSF_RECIP_SEED);
+#pragma GCC unroll 4
+    for (int step = 0; step < NS_FLOAT_NEWTON_STEPS; step++) {
+        NSF_LANES(NSF_RECIP_NEWTON);
+    }
+    NSF_LANES(NSF_RECIP_OUT);
+}
+
+static inline __attribute__((always_inline)) void sigmoid4(float *v)
+{
+    exp_recip4(v, false);
+}
+
+static inline __attribute__((always_inline)) void tanh4(float *v)
+{
+    exp_recip4(v, true);
+}
+
+// v[i] = sigmoid32(v[i]) for n values, bit for bit.
+static inline void sigmoid_n(float *v, int n)
+{
+    int i = 0;
+    for (; i + 4 <= n; i += 4) {
+        sigmoid4(v + i);
+    }
+    for (; i < n; i++) {
+        v[i] = sigmoid32(v[i]);
+    }
+}
+
+// v[i] = tanh32(v[i]) for n values, bit for bit.
+static inline void tanh_n(float *v, int n)
+{
+    int i = 0;
+    for (; i + 4 <= n; i += 4) {
+        tanh4(v + i);
+    }
+    for (; i < n; i++) {
+        v[i] = tanh32(v[i]);
+    }
 }
 
 // Rows of one GRU's gates: out[r] = bias[r] + w[r] . v over n inputs in order, four rows at a time.
@@ -153,15 +230,17 @@ static inline void gates(int count, int hid, const float *gi, const float *gh, c
 {
     for (int q = 0; q < count; q++) {
         for (int j = 0; j < 2 * hid; j++) {
-            rz[q * 2 * hid + j] = sigmoid32(gi[q * 3 * hid + j] + gh[q * 3 * hid + j]);
+            rz[q * 2 * hid + j] = gi[q * 3 * hid + j] + gh[q * 3 * hid + j];
         }
     }
+    sigmoid_n(rz, count * 2 * hid);
     for (int q = 0; q < count; q++) {
         for (int j = 0; j < hid; j++) {
             const int at = q * 3 * hid + 2 * hid + j;
-            n[q * hid + j] = tanh32(fmaf(rz[q * 2 * hid + j], gh[at], gi[at]));
+            n[q * hid + j] = fmaf(rz[q * 2 * hid + j], gh[at], gi[at]);
         }
     }
+    tanh_n(n, count * hid);
     for (int q = 0; q < count; q++) {
         for (int j = 0; j < hid; j++) {
             const float nj = n[q * hid + j];
@@ -181,11 +260,13 @@ static inline __attribute__((always_inline)) void gru_step(const ns_float_gru_t 
     float rz[2 * hid];
     float n[hid];
     for (int j = 0; j < 2 * hid; j++) {
-        rz[j] = sigmoid32(gi[j] + gh[j]);
+        rz[j] = gi[j] + gh[j];
     }
+    sigmoid_n(rz, 2 * hid);
     for (int j = 0; j < hid; j++) {
-        n[j] = tanh32(fmaf(rz[j], gh[2 * hid + j], gi[2 * hid + j]));
+        n[j] = fmaf(rz[j], gh[2 * hid + j], gi[2 * hid + j]);
     }
+    tanh_n(n, hid);
     for (int j = 0; j < hid; j++) {
         out[j] = fmaf(rz[hid + j], h[j] - n[j], n[j]);
     }
