@@ -59,6 +59,7 @@ static const struct {
     {"detect_decode", parity_detect_decode},
     {"wake_score", parity_wake_score},
     {"ns_gtcrn", parity_ns_gtcrn},
+    {"ns_ulunas", parity_ns_ulunas},
     {"pitch", parity_pitch},
     {"g2p", parity_g2p},
     {"normalize", parity_normalize},

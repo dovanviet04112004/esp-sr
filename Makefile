@@ -3,7 +3,7 @@
 # idf.py and the python that drives board B come from IDF's export.sh. In a terminal that has not sourced it, a goal
 # that needs them runs make once more under it, about 5 s; IDF_LOADED stops a second round if export.sh fails.
 IDF_EXPORT ?= $(HOME)/esp/esp-idf/export.sh
-IDF_GOALS := ai-unit ai-unit-cores ai-unit-gtcrn ai-unit-ctc ai-unit-pitch ai-unit-rnnt ai-unit-speaker ai-unit-wake bench-board board-c-check bss calib-flash \
+IDF_GOALS := ai-unit ai-unit-cores ai-unit-gtcrn ai-unit-ulunas ai-unit-ctc ai-unit-pitch ai-unit-rnnt ai-unit-speaker ai-unit-wake bench-board board-c-check bss calib-flash \
   capture-flash capture-radio-off-flash espsr-compare flash fw-bench fw-bench-flash fw-dev fw-prod listen-unit \
   models-flash monitor nvs-restore nvs-save parity-board product session session-plan storage-flash vision-flash \
   ai-unit-detect ai-kernels
@@ -606,6 +606,7 @@ storage-flash: fw-bench ## Write the bench build's LittleFS image, set.json amon
 LOADER_ATTEMPTS := 120
 # The running app's log ends one esptool's wait as serial noise, so the wait for the button is a loop of them.
 LOADER_TRIES := 300
+BOARD_C_LOADER := hold the button, power-cycle the board, wait 2 s, release (KEHOACH 2.1)
 product: ## Put the product back on board B after test apps: models, storage, then firmware, and show its boot [SPEAKER=b0|b3] [MICS=1] [BOARD=C]
 	$(if $(SPEAKER),$(MAKE) --no-print-directory speaker-use SPEAKER=$(SPEAKER))
 ifeq ($(BOARD),C)
@@ -666,7 +667,7 @@ calib-shift: ## Store NVS calib/pcm_shift through test_apps/calib: SHIFT=13
 # Where srpipe.scenes.compare prepare wrote the items, read from ml/ only when a recipe needs it.
 COMPARE_ITEMS = $(shell $(ML) --quiet python -c "from srpipe.core.config import data_paths; print(data_paths()['interim'] / 'scenes' / 'afe_compare')")
 
-.PHONY: bench-board bss espsr-compare ai-probe ai-unit ai-unit-gtcrn ai-unit-rnnt ai-unit-speaker ai-unit-ctc ai-unit-pitch ai-unit-wake ai-unit-cores \
+.PHONY: bench-board bss espsr-compare ai-probe ai-unit ai-unit-gtcrn ai-unit-ulunas ai-unit-rnnt ai-unit-speaker ai-unit-ctc ai-unit-pitch ai-unit-wake ai-unit-cores \
   ai-profile listen-unit
 bench-board: ## Run bench_afe on board B, keep its rows in docs/measurements/bench, then rebuild budget.md [BOARD=C]
 	@$(call fresh_sdkconfig,$(BENCH_APP)/sdkconfig,$(call app_defaults,$(BENCH_APP)) firmware/sdkconfig.afe)
@@ -830,20 +831,24 @@ ai-unit-cores: ## Run the product's four graphs on core 0, preempting each other
 	    | tee build_cores/unit.log; \
 	  exit $$(cat build_cores/unit.status 2>/dev/null || echo 1)
 
-ai-unit-gtcrn: ## GTCRN's C on board B: its golden bit for bit, then a hop's time with the state in internal RAM and PSRAM (ADR-0047) [BOARD=C]
-	@$(call fresh_sdkconfig,$(UNIT_APP)/build_gtcrn/sdkconfig,$(call app_defaults,$(UNIT_APP)))
-	cd $(UNIT_APP) && idf.py -B build_gtcrn -D SDKCONFIG=build_gtcrn/sdkconfig -D UNIT_PROFILE=gtcrn build
-ifeq ($(BOARD),C)
-	@echo "hold the button, power-cycle the board, wait 2 s, release (KEHOACH 2.1)"
-	cd $(UNIT_APP)/build_gtcrn && for try in $$(seq $(LOADER_TRIES)); do \
+# A hand-written ns net's C on the board, profile $(1) of the unit app: its golden bit for bit, then a hop's time.
+define ns_net_unit
+	@$(call fresh_sdkconfig,$(UNIT_APP)/build_$(1)/sdkconfig,$(call app_defaults,$(UNIT_APP)))
+	cd $(UNIT_APP) && idf.py -B build_$(1) -D SDKCONFIG=build_$(1)/sdkconfig -D UNIT_PROFILE=$(1) build
+	$(if $(filter C,$(BOARD)),@echo "$(BOARD_C_LOADER)")
+	$(if $(filter C,$(BOARD)),cd $(UNIT_APP)/build_$(1) && for try in $$(seq $(LOADER_TRIES)); do \
 	  python -m esptool --chip esp32s3 --port "$(PORT)" --baud $(FLASH_BAUD) \
 	  --before no-reset --after watchdog-reset --connect-attempts $(LOADER_ATTEMPTS) \
 	  write-flash --skip-flashed $$(sed -n 1p flash_args) $$(sed 1d flash_args | grep -v -e ota_data -e storage) \
-	  && exit 0; done; exit 1
-	cd $(UNIT_APP) && pytest pytest_unit.py $(ON_RUNNING_BOARD) -s
-else
-	cd $(UNIT_APP) && pytest pytest_unit.py $(ON_BOARD) --build-dir build_gtcrn -s
-endif
+	  && exit 0; done; exit 1)
+	cd $(UNIT_APP) && pytest pytest_unit.py $(if $(filter C,$(BOARD)),$(ON_RUNNING_BOARD),$(ON_BOARD) --build-dir build_$(1)) -s
+endef
+
+ai-unit-gtcrn: ## GTCRN's C on board B: its golden bit for bit, then a hop's time with the state in internal RAM and PSRAM (ADR-0047) [BOARD=C]
+	$(call ns_net_unit,gtcrn)
+
+ai-unit-ulunas: ## UL-UNAS's C on board B: its golden bit for bit, then a hop's time with the state in internal RAM and PSRAM (ADR-0048) [BOARD=C]
+	$(call ns_net_unit,ulunas)
 
 KERNELS_HOST_BUILD := firmware/components/ai_engine/test_apps/host/build_kernels
 ai-kernels: ## Run the plain C kernels against the PIE ones on board B, and their PC build against the board (ADR-0045) [BOARD=C]

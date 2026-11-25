@@ -20,6 +20,10 @@ elseif(UNIT_PROFILE STREQUAL "gtcrn")
     set(tests "test_gtcrn_timing.c" "../../../src/ns_gtcrn/gtcrn.c")
     set(embedded "../../../../../../contracts/golden/ns_gtcrn/case_000.gold")
     set(flashed "")
+elseif(UNIT_PROFILE STREQUAL "ulunas")
+    set(tests "test_ulunas_timing.c" "../../../src/ns_ulunas/ulunas.c")
+    set(embedded "../../../../../../contracts/golden/ns_ulunas/case_000.gold")
+    set(flashed "")
 elseif(UNIT_PROFILE STREQUAL "cores")
     set(tests "test_cores.cpp")
     set(embedded "")
@@ -60,9 +64,10 @@ idf_component_register(
     EMBED_FILES ${embedded}
     WHOLE_ARCHIVE
 )
-# GTCRN matches its mirror only without contraction; the golden's reader is the parity app's (ADR-0047).
-if(UNIT_PROFILE STREQUAL "gtcrn")
-    set_source_files_properties("../../../src/ns_gtcrn/gtcrn.c" PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
+# The hand-written ns nets match their mirrors only without contraction; the golden's reader is the parity app's.
+if(UNIT_PROFILE STREQUAL "gtcrn" OR UNIT_PROFILE STREQUAL "ulunas")
+    set_source_files_properties("../../../src/ns_gtcrn/gtcrn.c" "../../../src/ns_ulunas/ulunas.c"
+        PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
     target_include_directories(${COMPONENT_LIB} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../../../../../test_apps/parity/main")
 endif()
 # The same cases built twice, each against one implementation of the kernels (ADR-0045).

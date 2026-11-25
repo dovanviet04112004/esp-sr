@@ -4,7 +4,7 @@
 #include "parity.h"
 #include "test_report.h"
 
-#define CASE_BYTES_MAX (512 * 1024)
+#define CASE_BYTES_MAX (1024 * 1024)
 #define REPORT_LINES_MAX 64
 
 static bool read_case(const char *path, void *buf, size_t cap, size_t *len)
@@ -39,6 +39,7 @@ int main(int argc, char **argv)
         parity_run_block(argv[1], "pitch_decode", parity_pitch_decode, read_case, buf, sizeof(buf), &errors);
     cases += parity_run_block(argv[1], "wake_score", parity_wake_score, read_case, buf, sizeof(buf), &errors);
     cases += parity_run_block(argv[1], "ns_gtcrn", parity_ns_gtcrn, read_case, buf, sizeof(buf), &errors);
+    cases += parity_run_block(argv[1], "ns_ulunas", parity_ns_ulunas, read_case, buf, sizeof(buf), &errors);
     cases += parity_run_block(argv[1], "detect_decode", parity_detect_decode, read_case, buf, sizeof(buf),
                               &errors);
     test_report_line("done %u cases", cases);

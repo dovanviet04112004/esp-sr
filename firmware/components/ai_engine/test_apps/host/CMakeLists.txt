@@ -13,7 +13,8 @@ add_executable(ai_engine_parity_host main/parity_host.c "${ENGINE}/src/command_k
     "${ENGINE}/src/command_ctc/ctc_score.c" "${ENGINE}/src/command_rnnt/rnnt_search.c" "${ENGINE}/src/speaker/score.c"
     "${ENGINE}/src/pitch/decode.c" "${PARITY}/parity_common.c" "${PARITY}/parity_command_kws.c"
     "${PARITY}/parity_command_ctc.c" "${PARITY}/parity_command_rnnt.c" "${PARITY}/parity_speaker.c"
-    "${PARITY}/parity_pitch_decode.c" "${ENGINE}/src/wake/score.c" "${PARITY}/parity_wake_score.c" "${ENGINE}/src/ns_gtcrn/gtcrn.c" "${PARITY}/parity_ns_gtcrn.c" "${REPORT}/test_report.c"
+    "${PARITY}/parity_pitch_decode.c" "${ENGINE}/src/wake/score.c" "${PARITY}/parity_wake_score.c" "${ENGINE}/src/ns_gtcrn/gtcrn.c" "${PARITY}/parity_ns_gtcrn.c"
+    "${ENGINE}/src/ns_ulunas/ulunas.c" "${PARITY}/parity_ns_ulunas.c" "${REPORT}/test_report.c"
     "${ENGINE}/src/detect/decode.c" "${PARITY}/parity_detect_decode.c")
 target_include_directories(ai_engine_parity_host PRIVATE
     "${ENGINE}/src" "${ENGINE}/include" "${FIRMWARE}/components/dsp_afe/include" "${FIRMWARE}/components/common/include"
@@ -24,7 +25,7 @@ target_compile_options(ai_engine_parity_host PRIVATE -Wall -Wextra -Werror)
 # The ctc decision matches its mirror rounding for rounding: no multiply-add fused into one rounding (KEHOACH 3.12).
 set_source_files_properties("${ENGINE}/src/command_ctc/ctc_score.c" "${ENGINE}/src/command_rnnt/rnnt_search.c"
     "${ENGINE}/src/speaker/score.c" "${ENGINE}/src/pitch/decode.c" "${ENGINE}/src/wake/score.c"
-    "${ENGINE}/src/detect/decode.c" "${ENGINE}/src/ns_gtcrn/gtcrn.c" PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
+    "${ENGINE}/src/detect/decode.c" "${ENGINE}/src/ns_gtcrn/gtcrn.c" "${ENGINE}/src/ns_ulunas/ulunas.c" PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
 target_link_libraries(ai_engine_parity_host PRIVATE m)
 if(AI_ENGINE_HOST_PARITY_ONLY)
     return()
