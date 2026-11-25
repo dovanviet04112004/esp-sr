@@ -17,8 +17,8 @@ elseif(UNIT_PROFILE STREQUAL "detect")
     set(embedded "probe/detect_expect.bin")
     set(flashed "probe/detect_vision.bin" "probe/detect_broken.bin" "probe/detect_pictures.bin")
 elseif(UNIT_PROFILE STREQUAL "gtcrn")
-    set(tests "test_gtcrn_timing.c")
-    set(embedded "")
+    set(tests "test_gtcrn_timing.c" "../../../src/ns_gtcrn/gtcrn.c")
+    set(embedded "../../../../../../contracts/golden/ns_gtcrn/case_000.gold")
     set(flashed "")
 elseif(UNIT_PROFILE STREQUAL "cores")
     set(tests "test_cores.cpp")
@@ -60,6 +60,11 @@ idf_component_register(
     EMBED_FILES ${embedded}
     WHOLE_ARCHIVE
 )
+# GTCRN matches its mirror only without contraction; the golden's reader is the parity app's (ADR-0047).
+if(UNIT_PROFILE STREQUAL "gtcrn")
+    set_source_files_properties("../../../src/ns_gtcrn/gtcrn.c" PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
+    target_include_directories(${COMPONENT_LIB} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../../../../../test_apps/parity/main")
+endif()
 # The same cases built twice, each against one implementation of the kernels (ADR-0045).
 if(UNIT_PROFILE STREQUAL "kernels")
     set_source_files_properties("kernel_cases_pie.cpp" PROPERTIES INCLUDE_DIRECTORIES "${espdl}/kernels/impl/pie_esp32s3")

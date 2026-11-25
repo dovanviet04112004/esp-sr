@@ -824,7 +824,7 @@ ai-unit-cores: ## Run the product's four graphs on core 0, preempting each other
 	    | tee build_cores/unit.log; \
 	  exit $$(cat build_cores/unit.status 2>/dev/null || echo 1)
 
-ai-unit-gtcrn: ## Time a float32 hop shaped as GTCRN, random weights in PSRAM then internal RAM, on board B (ADR-0047) [BOARD=C]
+ai-unit-gtcrn: ## GTCRN's C on board B: its golden bit for bit, then a hop's time with the state in internal RAM and PSRAM (ADR-0047) [BOARD=C]
 	@$(call fresh_sdkconfig,$(UNIT_APP)/build_gtcrn/sdkconfig,$(call app_defaults,$(UNIT_APP)))
 	cd $(UNIT_APP) && idf.py -B build_gtcrn -D SDKCONFIG=build_gtcrn/sdkconfig -D UNIT_PROFILE=gtcrn build
 ifeq ($(BOARD),C)
