@@ -9,7 +9,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
-#include "ns_float/ns_float.h"
+#include "ns_float/ns_float_types.h"
 
 #ifdef __cplusplus
 extern "C" {

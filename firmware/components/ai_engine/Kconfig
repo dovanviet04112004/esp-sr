@@ -16,6 +16,23 @@ menu "ai_engine"
             bool "rnnt: src/command_rnnt/, the ctc encoder with a predictor and a joiner, every command scored exactly"
     endchoice
 
+    choice AI_ENGINE_NS_BACKEND
+        prompt "ns net (KEHOACH 3.9, ADR-0047, ADR-0048)"
+        default AI_ENGINE_NS_BACKEND_NONE
+        help
+            Which learned net builds into ai_engine for dsp_afe's ns slot; the model image names its ns entry after
+            it. NVS afe/ns_engine picks the OM-LSA floor or this net at run time.
+
+        config AI_ENGINE_NS_BACKEND_NONE
+            bool "none: src/ns/, no net; the slot runs the floor"
+
+        config AI_ENGINE_NS_BACKEND_GTCRN
+            bool "gtcrn: src/ns_gtcrn/, GTCRN in float32 C, 99.5 KB of weights"
+
+        config AI_ENGINE_NS_BACKEND_ULUNAS
+            bool "ulunas: src/ns_ulunas/, UL-UNAS in float32 C, 590 KB of weights"
+    endchoice
+
     choice AI_ENGINE_CORES
         prompt "cores ai_engine's own ops run on (KEHOACH 5.1, ADR-0027)"
         default AI_ENGINE_CORES_ONE

@@ -44,6 +44,18 @@ esp_err_t pitch_load() noexcept;
 /** Whether pitch_load built the branch. */
 bool pitch_ready() noexcept;
 
+/** Free whatever the ns branch built over the image about to be dropped. */
+void ns_drop() noexcept;
+
+/** Build the ns branch over the loaded image: the built net's weights and its state; ESP_OK also when the
+ * image carries no entry for it, or one it refuses, and the slot runs the floor (KEHOACH 3.9).
+ *  @ret ESP_OK | ESP_ERR_NO_MEM
+ */
+esp_err_t ns_load() noexcept;
+
+/** Whether ns_load built the branch. */
+bool ns_ready() noexcept;
+
 /** Free whatever the wake branch built over the image about to be dropped. */
 void wake_drop() noexcept;
 

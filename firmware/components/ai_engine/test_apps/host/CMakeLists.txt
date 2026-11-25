@@ -46,6 +46,26 @@ set_target_properties(ai_engine_host PROPERTIES C_STANDARD 17 CXX_STANDARD 20 CX
 target_compile_definitions(ai_engine_host PRIVATE $<$<COMPILE_LANGUAGE:CXX>:_Static_assert=static_assert>)
 target_compile_options(ai_engine_host PRIVATE -Wall -Wextra -Werror $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
 
+# Each hand-written ns net's glue: its image entry loads, and ai_engine_ns_ops() gives its golden gains (KEHOACH 3.9).
+foreach(net gtcrn ulunas)
+    add_executable(ai_engine_ns_host_${net} main/ns_host.c main/fake_storage.c main/speaker_stub.cpp
+        "${ENGINE}/src/core/engine.cpp" "${ENGINE}/src/core/model_image.cpp" "${ENGINE}/src/ns_${net}/ns.cpp"
+        "${ENGINE}/src/ns_${net}/${net}.c" "${ENGINE}/src/command/command.cpp" "${ENGINE}/src/synth/synth.cpp")
+    target_include_directories(ai_engine_ns_host_${net} PRIVATE
+        "${ENGINE}/include" "${ENGINE}/src" "${FIRMWARE}/components/dsp_afe/include"
+        "${FIRMWARE}/components/dsp_spec/include" "${FIRMWARE}/components/common/include"
+        "${FIRMWARE}/components/sys_storage/include" "${PARITY}"
+        "${CMAKE_CURRENT_LIST_DIR}/shim" "${FIRMWARE}/components/dsp_spec/test_apps/host/shim")
+    target_compile_definitions(ai_engine_ns_host_${net} PRIVATE NS_HOST_ENTRY="ns_${net}"
+        $<$<COMPILE_LANGUAGE:CXX>:_Static_assert=static_assert>)
+    target_link_libraries(ai_engine_ns_host_${net} PRIVATE OpenSSL::Crypto m)
+    set_target_properties(ai_engine_ns_host_${net} PROPERTIES C_STANDARD 17 CXX_STANDARD 20 CXX_EXTENSIONS OFF)
+    target_compile_options(ai_engine_ns_host_${net} PRIVATE -Wall -Wextra -Werror
+        $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
+    set_source_files_properties("${ENGINE}/src/ns_${net}/${net}.c" TARGET_DIRECTORY ai_engine_ns_host_${net}
+        PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
+endforeach()
+
 # The plain C kernels with the S3's numbers, over the board's cases, for make ai-kernels (ADR-0045).
 set(ESPDL "${ENGINE}/src/core/espdl")
 set(UNIT "${ENGINE}/test_apps/unit/main")

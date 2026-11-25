@@ -1,4 +1,5 @@
 #include "ns_gtcrn/gtcrn.h"
+#include "ns_float/ns_float.h"
 
 #include <math.h>
 #include <stdbool.h>
