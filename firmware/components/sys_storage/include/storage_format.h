@@ -97,8 +97,8 @@ _Static_assert(sizeof(storage_speaker_roster_t) == 8 + APP_SPEAKERS_MAX * 140,
 #define STORAGE_PATH_RESPONSES "/lfs/resp/vi.json"
 
 #define STORAGE_MODEL_MAGIC 0x444d5253u // "SRMD" little-endian
-#define STORAGE_MODEL_FORMAT_VER 11
-#define STORAGE_MODEL_MAX_ENTRIES 8
+#define STORAGE_MODEL_FORMAT_VER 12
+#define STORAGE_MODEL_MAX_ENTRIES 12
 #define STORAGE_SPK_NOISE_EDGES 3 // noise bins are one more, the last the quietest
 #define STORAGE_MODEL_NAME_BYTES 16
 #define STORAGE_MODEL_HEADER_BYTES 1024
@@ -110,8 +110,9 @@ typedef enum {
     STORAGE_MODEL_KIND_ESPDL = 1,
     STORAGE_MODEL_KIND_NORM = 2,
     STORAGE_MODEL_KIND_UNITS = 3,
-    STORAGE_MODEL_KIND_COHORT = 4, // speaker's cohort: unit embeddings, float32 rows of dims
-    STORAGE_MODEL_KIND_FRONT = 5,  // SwiftF0's front: storage_model_front_t, its tables
+    STORAGE_MODEL_KIND_COHORT = 4,  // speaker's cohort: unit embeddings, float32 rows of dims
+    STORAGE_MODEL_KIND_FRONT = 5,   // SwiftF0's front: storage_model_front_t, its tables
+    STORAGE_MODEL_KIND_WEIGHTS = 6, // a hand-written net's float32 and int32 arrays
 } storage_model_kind_t;
 
 #define STORAGE_FRONT_SPECTRA 3 // SwiftF0's STFTs, in the network's channel order
@@ -161,9 +162,9 @@ _Static_assert(sizeof(storage_model_entry_t) == 64, "model entry is 64 bytes (KE
 _Static_assert(sizeof(storage_model_front_t) == 28, "a FRONT entry's head is 28 bytes (KEHOACH 6.3)");
 _Static_assert(sizeof(storage_model_header_t) == STORAGE_MODEL_HEADER_BYTES,
                "model header is 1 KB (KEHOACH 6.3)");
-_Static_assert(offsetof(storage_model_header_t, spk_noise_edges) == 0x240,
+_Static_assert(offsetof(storage_model_header_t, spk_noise_edges) == 0x340,
                "the noise edges follow the entries (KEHOACH 6.3)");
-_Static_assert(offsetof(storage_model_header_t, spk_noisy_milli_z) == 0x24c,
+_Static_assert(offsetof(storage_model_header_t, spk_noisy_milli_z) == 0x34c,
                "the noisy thresholds follow the edges (KEHOACH 6.3)");
 
 #define STORAGE_VISION_MAGIC 0x49565253u // "SRVI" little-endian

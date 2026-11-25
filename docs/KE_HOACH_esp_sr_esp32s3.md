@@ -4296,8 +4296,8 @@ nào khai lại struct.
 ```
 offset 0x000  header 1 KB
    +0x000 magic       'SRMD'
-   +0x004 format_ver  u32, 11 cho khuôn này
-   +0x008 count       u32, ≤ 8
+   +0x004 format_ver  u32, 12 cho khuôn này
+   +0x008 count       u32, ≤ 12
    +0x00C grid_hash   u32 — băm của contracts/grid.yaml lúc huấn luyện
    +0x010 listen_hash u32 — băm của contracts/listen.yaml mà model command học theo; 0 khi ảnh không có command
    +0x014 cmd_reject_permille u16 — δ₁ chọn cho model command của ảnh; 0 khi ảnh không mang ngưỡng
@@ -4309,11 +4309,11 @@ offset 0x000  header 1 KB
    +0x030 spk_cohort_top u16 — K, số hàng cao nhất của nhóm chuẩn mà AS-norm lấy μ, σ; 0 khi ảnh không có speaker
    +0x032 wake_smooth_hops u16 — số khung điểm wake làm trơn trung bình trượt; 0 khi ảnh không có wake
    +0x034 dự trữ 12 B
-   +0x040 entry[8] × 64 B:
+   +0x040 entry[12] × 64 B:
           name[16]  offset u32  size u32  sha256[32]  kind u32  flags u32
-   +0x240 spk_noise_edges f32[3] — biên các dải độ ồn, tỉ số công suất lời trên đoạn trước lời, tăng dần; 0 khi ảnh không mang (ADR-0024)
-   +0x24C spk_noisy_milli_z i16[8][3] — ngưỡng của 3 dải ồn khi n = 1…8 người, dải ồn nhất trước
-   +0x27C dự trữ tới hết 1 KB
+   +0x340 spk_noise_edges f32[3] — biên các dải độ ồn, tỉ số công suất lời trên đoạn trước lời, tăng dần; 0 khi ảnh không mang (ADR-0024)
+   +0x34C spk_noisy_milli_z i16[8][3] — ngưỡng của 3 dải ồn khi n = 1…8 người, dải ồn nhất trước
+   +0x37C dự trữ tới hết 1 KB
 offset 0x400  dữ liệu, mỗi entry căn 64 B
 ```
 
@@ -4321,7 +4321,8 @@ offset 0x400  dữ liệu, mỗi entry căn 64 B
 (bảng đơn vị của `command` `ctc`), `COHORT` (nhóm chuẩn của `speaker`: embedding đơn vị float32, từng hàng
 `dims`), `FRONT` (bảng front end của `pitch`, SwiftF0, §3.11: đầu `storage_model_front_t` 28 B ghi số dải, số điểm và
 số trọng số của mỗi phổ; rồi mỗi phổ theo thứ tự kênh của mạng có cửa sổ float32, bin đầu và số bin uint16 của từng
-dải, trọng số float32 dải nối dải, mỗi mảng đệm tới bội 4 B). `ai_engine` trao con trỏ vào mục ấy cho `dsp_spec`. `flags`: bit 0 `IN_FLASH`, mục đọc tại chỗ qua mmap, không chép lên PSRAM (§6.5); bước đóng gói đặt nó cho đồ
+dải, trọng số float32 dải nối dải, mỗi mảng đệm tới bội 4 B), `WEIGHTS` (các mảng float32 và int32 mà một mạng viết
+tay đọc theo đúng thứ tự của nó, hiện là `ns_gtcrn`, ADR-0047). `ai_engine` trao con trỏ vào mục `FRONT` cho `dsp_spec`. `flags`: bit 0 `IN_FLASH`, mục đọc tại chỗ qua mmap, không chép lên PSRAM (§6.5); bước đóng gói đặt nó cho đồ
 thị của hàng deploy có `weights_in_flash`, hiện là `command_ctc` (ADR-0028) và `speaker` (§3.17), và cho nhóm chuẩn,
 chỉ đọc lúc tính μ, σ.
 

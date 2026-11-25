@@ -95,7 +95,7 @@ NOISY = tuple(tuple(1700 + 40 * n + 300 * b for b in range(len(EDGES))) for n in
 def test_the_header_carries_the_noise_edges_and_thresholds_after_every_entry_and_0_without() -> None:
     entries = [pack_models.Entry("speaker", "espdl", b"s" * 10)]
     image = pack_models.pack(entries, speaker_noise_edges=EDGES, speaker_noisy_milli_z=NOISY)
-    assert NOISE_AT == 0x240
+    assert NOISE_AT == 0x340
     got = pack_models.NOISE.unpack_from(image, NOISE_AT)
     assert got[: len(EDGES)] == EDGES and got[len(EDGES) :] == tuple(t for row in NOISY for t in row)
     bare = pack_models.pack(entries)

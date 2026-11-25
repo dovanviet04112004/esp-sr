@@ -49,7 +49,8 @@ HEADER_BYTES = storage_define("STORAGE_MODEL_HEADER_BYTES")
 ALIGN_BYTES = storage_define("STORAGE_MODEL_ALIGN_BYTES")
 SHA256_BYTES = storage_define("STORAGE_MODEL_SHA256_BYTES")
 KINDS = {
-    kind: storage_define(f"STORAGE_MODEL_KIND_{kind.upper()}") for kind in ("espdl", "norm", "units", "cohort", "front")
+    kind: storage_define(f"STORAGE_MODEL_KIND_{kind.upper()}")
+    for kind in ("espdl", "norm", "units", "cohort", "front", "weights")
 }
 IN_FLASH = storage_define("STORAGE_MODEL_FLAG_IN_FLASH")
 SPEAKERS = storage_define("APP_SPEAKERS_MAX", APP_EVENTS)
