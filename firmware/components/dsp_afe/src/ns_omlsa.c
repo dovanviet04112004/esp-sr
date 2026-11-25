@@ -114,6 +114,7 @@ typedef struct {
     float absent[N_BINS];
     float p_local[N_BINS];
     float p_global[N_BINS];
+    float power[N_BINS]; // the slot's bins as power, this hop
 } omlsa_state_t;
 
 static bool config_ok(const dsp_afe_ns_omlsa_config_t *cfg)
@@ -583,10 +584,9 @@ static void reset(void *ctx, void *state)
     reset_state(state);
 }
 
-static esp_err_t process(void *ctx, void *state, const float *power, const float *echo_power, float *gain,
-                         float *speech_prob)
+esp_err_t dsp_afe_ns_omlsa_power(const dsp_afe_ns_omlsa_config_t *cfg, void *state, const float *power,
+                                 const float *echo_power, float *gain, float *speech_prob)
 {
-    const dsp_afe_ns_omlsa_config_t *cfg = ctx;
     omlsa_state_t *st = state;
     if (!config_ok(cfg) || st == NULL || power == NULL || gain == NULL || speech_prob == NULL) {
         return ESP_ERR_INVALID_ARG;
@@ -647,6 +647,17 @@ static esp_err_t process(void *ctx, void *state, const float *power, const float
     *speech_prob = presence_sum * st->per_frame_bin;
     st->hop++;
     return ESP_OK;
+}
+
+static esp_err_t process(void *ctx, void *state, const float *bins, const float *echo_power, float *gain,
+                         float *speech_prob)
+{
+    omlsa_state_t *st = state;
+    if (st == NULL || bins == NULL) { return ESP_ERR_INVALID_ARG; }
+    for (size_t k = 0; k < N_BINS; k++) {
+        st->power[k] = bins[2 * k] * bins[2 * k] + bins[2 * k + 1] * bins[2 * k + 1];
+    }
+    return dsp_afe_ns_omlsa_power(ctx, st, st->power, echo_power, gain, speech_prob);
 }
 
 static const dsp_afe_ns_ops_t s_ops = {

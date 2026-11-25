@@ -130,7 +130,6 @@ static struct {
     void *ns_state[SEATS_MAX];
     float pcm[N_MICS][GEN_GRID_HOP_SAMPLES];
     float mics_mean[GEN_GRID_HOP_SAMPLES];
-    float power[GEN_GRID_N_BINS];
     float gain[GEN_GRID_N_BINS];
     float synth[GEN_GRID_HOP_SAMPLES];
     dsp_spec_cplx_t bins[N_MICS][GEN_GRID_N_BINS];
@@ -511,12 +510,8 @@ static esp_err_t build_chain(void)
 
 static void apply_ns(void *state, dsp_spec_cplx_t *y)
 {
-    for (size_t k = 0; k < GEN_GRID_N_BINS; k++) {
-        s_chain.power[k] = y[k].re * y[k].re + y[k].im * y[k].im;
-    }
     float speech_prob = 0.0f;
-    if (s_chain.ns->process(&s_chain.omlsa, state, s_chain.power, NULL, s_chain.gain, &speech_prob) !=
-        ESP_OK) {
+    if (s_chain.ns->process(&s_chain.omlsa, state, &y[0].re, NULL, s_chain.gain, &speech_prob) != ESP_OK) {
         return;
     }
     for (size_t k = 0; k < GEN_GRID_N_BINS; k++) {

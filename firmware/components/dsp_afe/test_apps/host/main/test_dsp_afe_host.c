@@ -78,12 +78,12 @@ static void unit_ns_reset(void *ctx, void *state)
     (void)state;
 }
 
-static esp_err_t unit_ns_process(void *ctx, void *state, const float *power, const float *echo_power,
+static esp_err_t unit_ns_process(void *ctx, void *state, const float *bins, const float *echo_power,
                                  float *gain, float *speech_prob)
 {
     (void)ctx;
     (void)state;
-    (void)power;
+    (void)bins;
     (void)echo_power;
     for (size_t k = 0; k < GEN_GRID_N_BINS; k++) {
         gain[k] = 1.0f;
@@ -587,12 +587,13 @@ static void check_module_shells(void)
           "one seat");
 
     dsp_afe_ns_omlsa_config_t ns_cfg = {.floor_db = -12.0f};
+    static const float silent_bins[2 * GEN_GRID_N_BINS];
     const dsp_afe_ns_ops_t *ns = dsp_afe_ns_omlsa_ops();
     float speech_prob = 1.0f;
     bytes = ns->state_bytes(&ns_cfg);
     void *ns_state = region(bytes);
     const bool ns_ok = ns->init(&ns_cfg, ns_state, bytes) == ESP_OK &&
-                       ns->process(&ns_cfg, ns_state, power, NULL, gain, &speech_prob) == ESP_OK &&
+                       ns->process(&ns_cfg, ns_state, silent_bins, NULL, gain, &speech_prob) == ESP_OK &&
                        gain[0] == 1.0f && gain[GEN_GRID_N_BINS - 1] == 1.0f && speech_prob == 0.0f;
     ns_cfg.floor_db = 3.0f;
     check(ns_ok && ns->state_bytes(&ns_cfg) == 0,

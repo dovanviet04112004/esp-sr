@@ -20,8 +20,8 @@ static bool run_hops(float floor_db, size_t hops, ns_io_t *io)
     bool ok = state != NULL && ns->init(&cfg, state, bytes) == ESP_OK;
     for (size_t h = 0; ok && h < hops; h++) {
         const size_t at = h * GEN_GRID_N_BINS;
-        ok = ns->process(&cfg, state, io->power + at, io->echo != NULL ? io->echo + at : NULL, io->gain + at,
-                         &io->speech_prob[h]) == ESP_OK;
+        ok = dsp_afe_ns_omlsa_power(&cfg, state, io->power + at, io->echo != NULL ? io->echo + at : NULL,
+                                    io->gain + at, &io->speech_prob[h]) == ESP_OK;
     }
     free(state);
     return ok;

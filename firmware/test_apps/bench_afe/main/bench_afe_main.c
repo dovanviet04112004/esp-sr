@@ -464,7 +464,7 @@ static void bench_ns(void)
             s_power[k] = level * x * x;
         }
         const uint32_t start = esp_cpu_get_cycle_count();
-        ESP_ERROR_CHECK(ns->process(&cfg, mem, s_power, NULL, s_gain, &speech_prob));
+        ESP_ERROR_CHECK(dsp_afe_ns_omlsa_power(&cfg, mem, s_power, NULL, s_gain, &speech_prob));
         hop_done(&t, h, start);
     }
     report(&row, &t);

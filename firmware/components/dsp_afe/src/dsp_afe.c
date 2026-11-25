@@ -25,6 +25,7 @@
 #define VAD_AGGRESSIVENESS_MAX 3 // dsp_afe_vad_config_t: 0 most lenient .. 3 strictest
 
 _Static_assert(N_MICS == 2, "the spatial stage takes exactly two microphones");
+_Static_assert(sizeof(dsp_spec_cplx_t) == 2 * sizeof(float), "the ns slot reads bins as re, im pairs");
 
 static const struct {
     const char *name;
@@ -90,7 +91,6 @@ struct dsp_afe_s {
     float pcm[MAX_CHANNELS][GEN_GRID_HOP_SAMPLES];
     dsp_spec_cplx_t bins[N_MICS][GEN_GRID_N_BINS];
     dsp_spec_cplx_t beam[N_MICS][GEN_GRID_N_BINS];
-    float power[GEN_GRID_N_BINS];
     float echo_power[GEN_GRID_N_BINS];
     float gain[GEN_GRID_N_BINS];
     float clean[GEN_GRID_HOP_SAMPLES];
@@ -542,12 +542,9 @@ static dsp_spec_cplx_t *run_spatial_stage(dsp_afe_t *afe)
 static void run_ns_stage(dsp_afe_t *afe, dsp_spec_cplx_t *y)
 {
     if (afe->ns == NULL) { return; }
-    for (size_t k = 0; k < GEN_GRID_N_BINS; k++) {
-        afe->power[k] = y[k].re * y[k].re + y[k].im * y[k].im;
-    }
     const float *echo_power = afe->n_channels > afe->n_mics ? afe->echo_power : NULL;
     float speech_prob = 0.0f;
-    if (afe->ns->process(afe->ns_ctx, afe->ns_state, afe->power, echo_power, afe->gain, &speech_prob) !=
+    if (afe->ns->process(afe->ns_ctx, afe->ns_state, &y[0].re, echo_power, afe->gain, &speech_prob) !=
         ESP_OK) {
         return;
     }
