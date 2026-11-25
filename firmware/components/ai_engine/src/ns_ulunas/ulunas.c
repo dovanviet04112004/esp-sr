@@ -69,41 +69,148 @@ static inline __attribute__((always_inline)) float log10_32(float v)
     return fmaf(ef, kLog10_2Hi, fmaf(ef, kLog10_2Lo, (s * p) * kLog10E2));
 }
 
-static void affine_prelu(float *x, int ch, int width, const ai_engine_ulunas_layer_t *l)
+static inline __attribute__((always_inline)) float act_of(const ai_engine_ulunas_layer_t *l, int i, int c,
+                                                          float v)
 {
-    if (l->act_a == NULL) { return; }
-    for (int c = 0; c < ch; c++) {
-        const float slope = l->act_slope[c];
-        for (int f = 0; f < width; f++) {
-            const int i = c * width + f;
-            const float v = x[i];
-            x[i] = fmaf(l->act_a[i], v, l->act_b[i]) + (v > 0.0f ? v : slope * v);
-        }
-    }
+    return l->act_a == NULL ? v : fmaf(l->act_a[i], v, l->act_b[i]) + (v > 0.0f ? v : l->act_slope[c] * v);
 }
 
-// A grouped 1x1 convolution: each output summed over its group's inputs in order.
+// Row of channel c of ch after a grouped block's shuffle: the first half to even rows, the second to odd
+// ones.
+static inline __attribute__((always_inline)) int row_of(int c, int ch, bool shuffled)
+{
+    const int half = ch / 2;
+    return !shuffled ? c : (c < half ? 2 * c : 2 * (c - half) + 1);
+}
+
+// A grouped 1x1 convolution, its AffinePReLU on the store: each output summed over its group's inputs in
+// order, four outputs by two positions at a time sharing their loads.
 static void point(const float *x, int cin, int nf, const ai_engine_ulunas_layer_t *l, int cout, int groups,
-                  float *out)
+                  bool shuffled, float *out)
 {
     const int per_in = cin / groups;
     const int per_out = cout / groups;
-    for (int co = 0; co < cout; co++) {
-        const float *w = l->w + co * per_in;
-        const float *xg = x + (co / per_out) * per_in * nf;
-        for (int f = 0; f < nf; f++) {
-            float acc = l->b[co];
-            for (int ci = 0; ci < per_in; ci++) {
-                acc = fmaf(w[ci], xg[ci * nf + f], acc);
+    for (int g = 0; g < groups; g++) {
+        const float *xg = x + g * per_in * nf;
+        const int end = (g + 1) * per_out;
+        int co = g * per_out;
+        for (; co + 4 <= end; co += 4) {
+            const float *w0 = l->w + co * per_in;
+            const float *w1 = w0 + per_in;
+            const float *w2 = w1 + per_in;
+            const float *w3 = w2 + per_in;
+            for (int f = 0; f < nf; f += 2) {
+                const bool pair = f + 1 < nf;
+                float a0 = l->b[co], a1 = l->b[co + 1], a2 = l->b[co + 2], a3 = l->b[co + 3];
+                float c0 = a0, c1 = a1, c2 = a2, c3 = a3;
+                for (int ci = 0; ci < per_in; ci++) {
+                    const float x0 = xg[ci * nf + f];
+                    const float x1 = pair ? xg[ci * nf + f + 1] : 0.0f;
+                    a0 = fmaf(w0[ci], x0, a0);
+                    a1 = fmaf(w1[ci], x0, a1);
+                    a2 = fmaf(w2[ci], x0, a2);
+                    a3 = fmaf(w3[ci], x0, a3);
+                    c0 = fmaf(w0[ci], x1, c0);
+                    c1 = fmaf(w1[ci], x1, c1);
+                    c2 = fmaf(w2[ci], x1, c2);
+                    c3 = fmaf(w3[ci], x1, c3);
+                }
+                const float a[4] = {a0, a1, a2, a3};
+                const float c[4] = {c0, c1, c2, c3};
+                for (int j = 0; j < 4; j++) {
+                    float *row = out + row_of(co + j, cout, shuffled) * nf;
+                    row[f] = act_of(l, (co + j) * nf + f, co + j, a[j]);
+                    if (pair) { row[f + 1] = act_of(l, (co + j) * nf + f + 1, co + j, c[j]); }
+                }
             }
-            out[co * nf + f] = acc;
+        }
+        for (; co < end; co++) {
+            const float *w = l->w + co * per_in;
+            float *row = out + row_of(co, cout, shuffled) * nf;
+            for (int f = 0; f < nf; f++) {
+                float acc = l->b[co];
+                for (int ci = 0; ci < per_in; ci++) {
+                    acc = fmaf(w[ci], xg[ci * nf + f], acc);
+                }
+                row[f] = act_of(l, co * nf + f, co, acc);
+            }
         }
     }
 }
 
-// The causal convolution over span, (cin, kt, fin) oldest frame first: b, then taps over the group's ci, t,
-// k, the zero padding included.
-static void conv_span(const float *span, int cin, const unit_t *u, const ai_engine_ulunas_layer_t *l,
+// The causal convolution over rows width wide, pad zeros at both ends of each: b, then the taps over the
+// group's ci, t, k, the padding's included; four positions at a time share each weight's load.
+static void conv_rows(const float *rows, int width, int cin, const unit_t *u,
+                      const ai_engine_ulunas_layer_t *l, int cout, int groups, float *out)
+{
+    const int kf = u->kf;
+    const int s = u->stride;
+    const int fout = u->fout;
+    const int per_out = cout / groups;
+    const int taps = cin / groups * u->kt;
+    for (int co = 0; co < cout; co++) {
+        const float *w = l->w + co * taps * kf;
+        const float *base = rows + (co / per_out) * taps * width;
+        const float b = l->b[co];
+        float *o = out + co * fout;
+        int fo = 0;
+        for (; fo + 4 <= fout; fo += 4) {
+            float a0 = b, a1 = b, a2 = b, a3 = b;
+            for (int r = 0; r < taps; r++) {
+                const float *x = base + r * width + fo * s;
+                const float *wr = w + r * kf;
+                for (int k = 0; k < kf; k++) {
+                    const float wk = wr[k];
+                    a0 = fmaf(wk, x[k], a0);
+                    a1 = fmaf(wk, x[s + k], a1);
+                    a2 = fmaf(wk, x[2 * s + k], a2);
+                    a3 = fmaf(wk, x[3 * s + k], a3);
+                }
+            }
+            o[fo] = act_of(l, co * fout + fo, co, a0);
+            o[fo + 1] = act_of(l, co * fout + fo + 1, co, a1);
+            o[fo + 2] = act_of(l, co * fout + fo + 2, co, a2);
+            o[fo + 3] = act_of(l, co * fout + fo + 3, co, a3);
+        }
+        for (; fo < fout; fo++) {
+            float acc = b;
+            for (int r = 0; r < taps; r++) {
+                const float *x = base + r * width + fo * s;
+                for (int k = 0; k < kf; k++) {
+                    acc = fmaf(w[r * kf + k], x[k], acc);
+                }
+            }
+            o[fo] = act_of(l, co * fout + fo, co, acc);
+        }
+    }
+}
+
+// One output of the stride 1 transposed convolution near an edge: b, then x[ci][fo + pad - k]
+// w[ci][co'][t][k] for span frame kt - 1 - t over the group's ci, t, k, real taps only.
+static float deconv1_edge(const float *span, int ci0, int per_in, int per_out, int local, const unit_t *u,
+                          const ai_engine_ulunas_layer_t *l, float b, int fo)
+{
+    const int kt = u->kt;
+    const int kf = u->kf;
+    const int fin = u->fin;
+    const int pad = kf / 2;
+    float acc = b;
+    for (int ci = ci0; ci < ci0 + per_in; ci++) {
+        const float *wc = l->w + (ci * per_out + local) * kt * kf;
+        for (int t = 0; t < kt; t++) {
+            const float *row = span + (ci * kt + (kt - 1 - t)) * fin;
+            for (int k = 0; k < kf; k++) {
+                const int fi = fo + pad - k;
+                if (fi >= 0 && fi < fin) { acc = fmaf(row[fi], wc[t * kf + k], acc); }
+            }
+        }
+    }
+    return acc;
+}
+
+// The last frame of the causal transposed convolution of stride 1 over span, (cin, kt, fin) oldest first, as
+// deconv1_edge sums it; away from the edges every tap falls inside, four positions at a time.
+static void deconv_s1(const float *span, int cin, const unit_t *u, const ai_engine_ulunas_layer_t *l,
                       int cout, int groups, float *out)
 {
     const int kt = u->kt;
@@ -113,83 +220,110 @@ static void conv_span(const float *span, int cin, const unit_t *u, const ai_engi
     const int per_in = cin / groups;
     const int per_out = cout / groups;
     for (int co = 0; co < cout; co++) {
-        const float *w = l->w + co * per_in * kt * kf;
-        const float *sg = span + (co / per_out) * per_in * kt * fin;
-        for (int fo = 0; fo < u->fout; fo++) {
-            float acc = l->b[co];
-            for (int r = 0; r < per_in * kt; r++) {
-                const float *row = sg + r * fin;
-                for (int k = 0; k < kf; k++) {
-                    const int f = fo * u->stride - pad + k;
-                    acc = fmaf(w[r * kf + k], f >= 0 && f < fin ? row[f] : 0.0f, acc);
-                }
-            }
-            out[co * u->fout + fo] = acc;
-        }
-    }
-}
-
-// The last frame of the causal transposed convolution over span: b, then x[ci][fi] w[ci][co'][t][k] for frame
-// kt - 1 - t over the group's ci, t, k, each fi = (fo + pad - k) / stride whole and in range.
-static void deconv_span(const float *span, int cin, const unit_t *u, const ai_engine_ulunas_layer_t *l,
-                        int cout, int groups, float *out)
-{
-    const int kt = u->kt;
-    const int kf = u->kf;
-    const int fin = u->fin;
-    const int pad = kf / 2;
-    const int per_in = cin / groups;
-    const int per_out = cout / groups;
-    for (int co = 0; co < cout; co++) {
-        const int g = co / per_out;
+        const int ci0 = co / per_out * per_in;
         const int local = co % per_out;
-        for (int fo = 0; fo < u->fout; fo++) {
-            float acc = l->b[co];
-            for (int ci = g * per_in; ci < (g + 1) * per_in; ci++) {
+        const float b = l->b[co];
+        float *o = out + co * fin;
+        for (int fo = 0; fo < pad; fo++) {
+            o[fo] =
+                act_of(l, co * fin + fo, co, deconv1_edge(span, ci0, per_in, per_out, local, u, l, b, fo));
+        }
+        int fo = pad;
+        for (; fo + 4 <= fin - pad; fo += 4) {
+            float a0 = b, a1 = b, a2 = b, a3 = b;
+            for (int ci = ci0; ci < ci0 + per_in; ci++) {
                 const float *wc = l->w + (ci * per_out + local) * kt * kf;
                 for (int t = 0; t < kt; t++) {
-                    const float *row = span + (ci * kt + (kt - 1 - t)) * fin;
+                    const float *x = span + (ci * kt + (kt - 1 - t)) * fin + fo + pad;
                     for (int k = 0; k < kf; k++) {
-                        const int num = fo + pad - k;
-                        if (num >= 0 && num % u->stride == 0 && num / u->stride < fin) {
-                            acc = fmaf(row[num / u->stride], wc[t * kf + k], acc);
-                        }
+                        const float wk = wc[t * kf + k];
+                        a0 = fmaf(x[-k], wk, a0);
+                        a1 = fmaf(x[1 - k], wk, a1);
+                        a2 = fmaf(x[2 - k], wk, a2);
+                        a3 = fmaf(x[3 - k], wk, a3);
                     }
                 }
             }
-            out[co * u->fout + fo] = acc;
+            o[fo] = act_of(l, co * fin + fo, co, a0);
+            o[fo + 1] = act_of(l, co * fin + fo + 1, co, a1);
+            o[fo + 2] = act_of(l, co * fin + fo + 2, co, a2);
+            o[fo + 3] = act_of(l, co * fin + fo + 3, co, a3);
+        }
+        for (; fo < fin; fo++) {
+            o[fo] =
+                act_of(l, co * fin + fo, co, deconv1_edge(span, ci0, per_in, per_out, local, u, l, b, fo));
         }
     }
 }
 
-// The cache's kt - 1 frames, then x, into the span; the layer over it; then the cache moved on a frame.
+// The transposed convolution of stride 2, kernel 3, padding 1, every tap inside: even outputs take tap 1 of
+// x[fo / 2], odd ones tap 0 of x[fo / 2 + 1] then tap 2 of x[fo / 2], over ci, then t.
+static void deconv_s2k3(const float *span, int cin, const unit_t *u, const ai_engine_ulunas_layer_t *l,
+                        int cout, int groups, float *out)
+{
+    const int kt = u->kt;
+    const int fin = u->fin;
+    const int fout = u->fout;
+    const int per_in = cin / groups;
+    const int per_out = cout / groups;
+    for (int co = 0; co < cout; co++) {
+        const int ci0 = co / per_out * per_in;
+        const int local = co % per_out;
+        float *o = out + co * fout;
+        for (int i = 0; i < fin; i++) {
+            float even = l->b[co];
+            float odd = l->b[co];
+            const bool has_odd = i + 1 < fin;
+            for (int ci = ci0; ci < ci0 + per_in; ci++) {
+                const float *wc = l->w + (ci * per_out + local) * kt * 3;
+                for (int t = 0; t < kt; t++) {
+                    const float *x = span + (ci * kt + (kt - 1 - t)) * fin;
+                    const float *wt = wc + t * 3;
+                    even = fmaf(x[i], wt[1], even);
+                    if (has_odd) { odd = fmaf(x[i], wt[2], fmaf(x[i + 1], wt[0], odd)); }
+                }
+            }
+            o[2 * i] = act_of(l, co * fout + 2 * i, co, even);
+            if (has_odd) { o[2 * i + 1] = act_of(l, co * fout + 2 * i + 1, co, odd); }
+        }
+    }
+}
+
+// The cache's kt - 1 frames, then x, into the span; the layer over it with its AffinePReLU; then the cache
+// moved on a frame. A convolution's span rows carry pad zeros at both ends; a transposed one's carry none.
 static void temporal(const unit_t *u, const ai_engine_ulunas_layer_t *l, const float *x, int ch, int cout,
                      int groups, ai_engine_ulunas_state_t *st, float *out)
 {
     const int kt = u->kt;
     const int fin = u->fin;
+    const int pad = u->deconv ? 0 : u->kf / 2;
+    const int width = fin + 2 * pad;
     float *cache = st->cache + u->cache_at;
-    const float *span = x;
-    if (kt > 1) {
-        for (int c = 0; c < ch; c++) {
-            memcpy(st->span + c * kt * fin, cache + c * (kt - 1) * fin,
-                   (size_t)(kt - 1) * fin * sizeof(float));
-            memcpy(st->span + (c * kt + kt - 1) * fin, x + c * fin, (size_t)fin * sizeof(float));
+    float *rows = st->span;
+    for (int c = 0; c < ch; c++) {
+        for (int t = 0; t < kt; t++) {
+            float *row = rows + (c * kt + t) * width;
+            const float *src = t < kt - 1 ? cache + (c * (kt - 1) + t) * fin : x + c * fin;
+            for (int i = 0; i < pad; i++) {
+                row[i] = 0.0f;
+                row[pad + fin + i] = 0.0f;
+            }
+            memcpy(row + pad, src, (size_t)fin * sizeof(float));
         }
-        span = st->span;
     }
-    if (u->deconv) {
-        deconv_span(span, ch, u, l, cout, groups, out);
+    if (!u->deconv) {
+        conv_rows(rows, width, ch, u, l, cout, groups, out);
+    } else if (u->stride == 2) {
+        deconv_s2k3(rows, ch, u, l, cout, groups, out);
     } else {
-        conv_span(span, ch, u, l, cout, groups, out);
+        deconv_s1(rows, ch, u, l, cout, groups, out);
     }
-    if (kt > 1) {
-        for (int c = 0; c < ch; c++) {
-            memcpy(cache + c * (kt - 1) * fin, st->span + (c * kt + 1) * fin,
-                   (size_t)(kt - 1) * fin * sizeof(float));
+    for (int c = 0; c < ch; c++) {
+        for (int t = 0; t + 1 < kt; t++) {
+            memcpy(cache + (c * (kt - 1) + t) * fin, rows + (c * kt + t + 1) * width + pad,
+                   (size_t)fin * sizeof(float));
         }
     }
-    affine_prelu(out, cout, u->fout, l);
 }
 
 static void shuffle(const float *x, int ch, int width, float *out)
@@ -201,8 +335,8 @@ static void shuffle(const float *x, int ch, int width, float *out)
     }
 }
 
-// cTFA over x in place: the time GRU on each channel's mean square moves h a hop; the frequency GRU runs both
-// ways over the zero-padded chunks of the channels' mean square.
+// cTFA over x in place: a time GRU on each channel's mean square, and a frequency GRU over the padded chunks
+// of the channels' mean square, forward and backward in lockstep, input gates taken first.
 static void run_tfa(const ai_engine_ulunas_tfa_t *t, float *x, int ch, int width, float *h,
                     ai_engine_ulunas_state_t *st)
 {
@@ -226,15 +360,25 @@ static void run_tfa(const ai_engine_ulunas_tfa_t *t, float *x, int ch, int width
         }
         st->zf[f] = a;
     }
-    for (int dir = 0; dir < 2; dir++) {
-        float state[CHUNK] = {0};
-        for (int i = 0; i < chunks; i++) {
-            const int p = dir == 0 ? i : chunks - 1 - i;
-            float next[CHUNK];
-            gru_step(&t->fa[dir], CHUNK, CHUNK, st->zf + p * CHUNK, state, next);
-            memcpy(state, next, sizeof(state));
-            memcpy(st->both + p * 2 * CHUNK + dir * CHUNK, state, sizeof(state));
-        }
+    enum { ROWS = 3 * CHUNK };
+    float *gi = st->gi;
+    for (int i = 0; i < chunks; i++) {
+        gate_rows(t->fa[0].wih, t->fa[0].bih, ROWS, CHUNK, st->zf + i * CHUNK, gi + (2 * i) * ROWS);
+        gate_rows(t->fa[1].wih, t->fa[1].bih, ROWS, CHUNK, st->zf + (chunks - 1 - i) * CHUNK,
+                  gi + (2 * i + 1) * ROWS);
+    }
+    float h2[2 * CHUNK] = {0};
+    float gh2[2 * ROWS];
+    float rz[2 * 2 * CHUNK];
+    float nn[2 * CHUNK];
+    float next[2 * CHUNK];
+    for (int i = 0; i < chunks; i++) {
+        gate_rows(t->fa[0].whh, t->fa[0].bhh, ROWS, CHUNK, h2, gh2);
+        gate_rows(t->fa[1].whh, t->fa[1].bhh, ROWS, CHUNK, h2 + CHUNK, gh2 + ROWS);
+        gates(2, CHUNK, gi + 2 * i * ROWS, gh2, h2, CHUNK, rz, nn, next, CHUNK);
+        memcpy(h2, next, sizeof(h2));
+        memcpy(st->both + i * 2 * CHUNK, h2, CHUNK * sizeof(float));
+        memcpy(st->both + (chunks - 1 - i) * 2 * CHUNK + CHUNK, h2 + CHUNK, CHUNK * sizeof(float));
     }
     for (int p = 0; p < chunks; p++) {
         dense(t->fa_fc_w, t->fa_fc_b, 2 * CHUNK, CHUNK, st->both + p * 2 * CHUNK, st->af + p * CHUNK);
@@ -259,16 +403,14 @@ static void run_unit(const unit_t *u, const ai_engine_ulunas_unit_t *wt, ai_engi
         run_tfa(&wt->tfa, out, u->cout, u->fout, h, st);
         return;
     }
-    point(x, u->cin, u->fin, &wt->layer[0], u->cout, u->groups, st->p);
-    affine_prelu(st->p, u->cout, u->fin, &wt->layer[0]);
-    shuffle(st->p, u->cout, u->fin, st->q);
+    point(x, u->cin, u->fin, &wt->layer[0], u->cout, u->groups, u->groups == 2, st->q);
     if (u->kind == XDWS) {
         temporal(u, &wt->layer[1], st->q, u->cout, u->cout, u->cout, st, out);
         run_tfa(&wt->tfa, out, u->cout, u->fout, h, st);
         return;
     }
     temporal(u, &wt->layer[1], st->q, u->cout, u->cout, u->cout, st, st->d);
-    point(st->d, u->cout, u->fout, &wt->layer[2], u->cout, u->groups, st->p);
+    point(st->d, u->cout, u->fout, &wt->layer[2], u->cout, u->groups, false, st->p);
     run_tfa(&wt->tfa, st->p, u->cout, u->fout, h, st);
     shuffle(st->p, u->cout, u->fout, out);
 }

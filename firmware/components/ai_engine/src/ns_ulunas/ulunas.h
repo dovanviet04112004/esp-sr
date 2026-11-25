@@ -23,7 +23,7 @@ extern "C" {
 #define AI_ENGINE_ULUNAS_TFA 402    // the ten attention GRUs' hidden units
 #define AI_ENGINE_ULUNAS_SKIPS 3948 // the encoder's five outputs, one after another
 #define AI_ENGINE_ULUNAS_PLANE 1560 // the widest block plane: 24 channels by 65 bins
-#define AI_ENGINE_ULUNAS_SPAN 3120  // the widest span: 24 channels by 2 frames by 65 bins
+#define AI_ENGINE_ULUNAS_SPAN 3216  // the widest span with padding: 24 by 2 frames by 67
 #define AI_ENGINE_ULUNAS_CHUNKS 33  // frequency GRU steps over 129 bins, 4 a step
 
 typedef struct {
