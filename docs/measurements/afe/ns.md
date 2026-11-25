@@ -495,3 +495,35 @@ Chu kỳ mỗi bước của bản thứ hai, đếm tạm bằng `esp_cpu_get_c
 - Một phép chia float32 trên S3 tốn khoảng 90 chu kỳ: 257 căn bậc hai, mỗi căn 6 phép chia, hết 152 475 chu kỳ.
 - Bản này vẫn gấp 1,4 lần nhịp 16 ms, mà nhân 1 còn chạy cả chuỗi. Các chỗ còn lấy được là sigmoid, tanh và căn bậc hai
   bỏ phép chia, ConvTranspose bỏ phép chia nguyên, và GRU duỗi vòng theo cỡ cố định.
+
+Các vòng tối ưu sau đó, cùng phép đo, bản nào cũng khớp golden từng bit trên máy tính và trên board C:
+
+| Vòng | Đổi gì | Trạng thái ở RAM trong | Trạng thái ở PSRAM |
+|---|---|---|---|
+| 2 | nghịch đảo và căn bậc hai không phép chia (cả bản soi gương), ConvTranspose riêng cho bước 2 | 20 386 µs | 22 074 µs |
+| 3 | exp, nghịch đảo, căn, sigmoid, tanh inline; GRU, dense, depthwise bốn tổng độc lập một lượt | 16 317 µs | 18 033 µs |
+| 4 | duỗi vòng GRU và dense, cache đúng cỡ thật (trạng thái 193 → 134 KB) | 16 364 µs | 18 111 µs |
+| 5 | cache mỗi khối thành vòng đệm, bỏ `memmove` | 12 948 µs | 14 222 µs |
+| 6 | cổng GRU tách thành vòng riêng, conv 1×1 và bước 2 bốn kênh × hai vị trí | 12 726 µs | 14 014 µs |
+| 7 | GRU liên khung gộp 66 GRU một lượt, GRU nội tần bốn chuỗi song song | 12 386 µs | 13 838 µs |
+
+Đếm chu kỳ theo khâu ở vòng 4, trạng thái ở RAM trong, mỗi bước 3,9 triệu chu kỳ:
+
+| Khâu | Chu kỳ |
+|---|---|
+| dịch cache của 6 khối bằng `memmove`, cùng conv 1×1 thứ hai | 908 738 |
+| GRU liên khung, 2 khối | 689 962 |
+| GRU nội tần, 2 khối | 671 200 |
+| conv 1×1 thứ nhất của 6 khối | 353 654 |
+| `en0`, `en1` | 321 255 |
+| 2 ConvTranspose | 248 841 |
+| depthwise của 6 khối | 218 821 |
+| chú ý theo thời gian của 6 khối | 151 794 |
+| dense và LayerNorm, 2 khối | 188 064 |
+| còn lại | 120 000 |
+
+- Vòng 5 lấy lại gần đúng phần `memmove`: 3,1 triệu chu kỳ mỗi bước.
+- Gần 5 100 sigmoid và tanh mỗi bước tốn khoảng 200 chu kỳ mỗi cái, kể cả các bước chuyển giữa thanh ghi float và
+  thanh ghi nguyên. Gom chúng thành vòng dài ở vòng 7 chỉ lấy được 0,3 ms.
+- Một bước 13,8 ms với trạng thái ở PSRAM, như sản phẩm sẽ đặt, cộng phần còn lại của chuỗi trên board C (5,4 ms có
+  `aec`, bỏ 1,7 ms của OM-LSA), vượt nhịp 16 ms của nhân 1.
