@@ -116,6 +116,14 @@ void dsp_afe_reset(dsp_afe_t *afe);
  */
 void dsp_afe_resume(dsp_afe_t *afe);
 
+/** Plug another implementation into the ns slot between two hops, from its init; ns NULL is the floor.
+ *  init sized the region for the floor and cfg->ns; a plugged one's gains stay at ns_floor_db or above.
+ *  @ctx task | non-blocking | same task as dsp_afe_feed; ns_ctx owned by the caller for the life of afe
+ *  @ret ESP_OK | ESP_ERR_INVALID_STATE no slot | ESP_ERR_NOT_SUPPORTED NULL without the floor
+ *       | ESP_ERR_INVALID_SIZE short region | init's error, the current one started afresh
+ */
+esp_err_t dsp_afe_set_ns(dsp_afe_t *afe, const dsp_afe_ns_ops_t *ns, void *ns_ctx);
+
 /** Change one runtime parameter, as SET_CONFIG asks.
  *  @ctx task | non-blocking | same task as dsp_afe_feed
  *  @ret ESP_OK | ESP_ERR_INVALID_ARG value out of range

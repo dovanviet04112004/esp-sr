@@ -61,6 +61,9 @@ struct dsp_afe_s {
     const dsp_afe_ns_ops_t *ns;
     void *ns_ctx;
     void *ns_state;
+    size_t ns_bytes; // the slot's region, sized for the floor and cfg.ns alike
+    bool ns_plugged; // a slot from outside, its gains held at slot_floor
+    float slot_floor;
     dsp_afe_ns_omlsa_config_t omlsa;
 #if CONFIG_DSP_AFE_HPF_ENABLE
     dsp_afe_hpf_t *hpf;
@@ -297,28 +300,42 @@ static void walk_spatial(walker_t *w, dsp_afe_spatial_t spatial, dsp_afe_t *afe)
     }
 }
 
+// The shared floor as a linear gain, computed as the Python chain computes it (KEHOACH 3.9).
+static float floor_gain(float floor_db)
+{
+    return (float)pow(10.0, (double)floor_db / 20.0);
+}
+
+// One region serves the floor and cfg->ns alike, so dsp_afe_set_ns can swap them between hops
+// (KEHOACH 4.5.5).
 static void walk_ns(walker_t *w, const dsp_afe_config_t *cfg, dsp_afe_t *afe)
 {
     const dsp_afe_ns_ops_t *ops = cfg->ns;
     void *ctx = cfg->ns_ctx;
+    size_t bytes = ops != NULL ? ops->state_bytes(ctx) : 0;
 #if CONFIG_DSP_AFE_NS_OMLSA_ENABLE
     dsp_afe_ns_omlsa_config_t sizing_ctx = {.floor_db = cfg->ns_floor_db};
+    const size_t floor_bytes = dsp_afe_ns_omlsa_ops()->state_bytes(&sizing_ctx);
+    bytes = bytes > floor_bytes ? bytes : floor_bytes;
+    void *floor_ctx = &sizing_ctx;
+    if (afe != NULL) {
+        afe->omlsa = sizing_ctx;
+        floor_ctx = &afe->omlsa;
+    }
     if (ops == NULL) {
         ops = dsp_afe_ns_omlsa_ops();
-        ctx = &sizing_ctx;
-        if (afe != NULL) {
-            afe->omlsa = sizing_ctx;
-            ctx = &afe->omlsa;
-        }
+        ctx = floor_ctx;
     }
 #endif
     if (ops == NULL) { return; }
-    const size_t bytes = ops->state_bytes(ctx);
     void *mem = region(w, bytes);
     if (mem != NULL) {
         afe->ns = ops;
         afe->ns_ctx = ctx;
         afe->ns_state = mem;
+        afe->ns_bytes = bytes;
+        afe->ns_plugged = cfg->ns != NULL;
+        afe->slot_floor = floor_gain(cfg->ns_floor_db);
         fail(w, ops->init(ctx, mem, bytes));
     }
 }
@@ -548,6 +565,11 @@ static void run_ns_stage(dsp_afe_t *afe, dsp_spec_cplx_t *y)
         ESP_OK) {
         return;
     }
+    if (afe->ns_plugged) {
+        for (size_t k = 0; k < GEN_GRID_N_BINS; k++) {
+            afe->gain[k] = afe->gain[k] > afe->slot_floor ? afe->gain[k] : afe->slot_floor;
+        }
+    }
     for (size_t k = 0; k < GEN_GRID_N_BINS; k++) {
         y[k].re *= afe->gain[k];
         y[k].im *= afe->gain[k];
@@ -713,6 +735,31 @@ void dsp_afe_resume(dsp_afe_t *afe)
 #endif
 }
 
+esp_err_t dsp_afe_set_ns(dsp_afe_t *afe, const dsp_afe_ns_ops_t *ns, void *ns_ctx)
+{
+    if (afe == NULL || afe->ns_state == NULL) { return ESP_ERR_INVALID_STATE; }
+    const dsp_afe_ns_ops_t *ops = ns;
+    void *ctx = ns_ctx;
+#if CONFIG_DSP_AFE_NS_OMLSA_ENABLE
+    if (ops == NULL) {
+        ops = dsp_afe_ns_omlsa_ops();
+        ctx = &afe->omlsa;
+    }
+#endif
+    if (ops == NULL) { return ESP_ERR_NOT_SUPPORTED; }
+    if (ops->state_bytes(ctx) > afe->ns_bytes) { return ESP_ERR_INVALID_SIZE; }
+    const esp_err_t err = ops->init(ctx, afe->ns_state, afe->ns_bytes);
+    if (err != ESP_OK) {
+        // The region now holds part of the refused one: the current one starts afresh.
+        afe->ns->init(afe->ns_ctx, afe->ns_state, afe->ns_bytes);
+        return err;
+    }
+    afe->ns = ops;
+    afe->ns_ctx = ctx;
+    afe->ns_plugged = ns != NULL;
+    return ESP_OK;
+}
+
 esp_err_t dsp_afe_set_param(dsp_afe_t *afe, dsp_afe_param_t param, float value)
 {
     if (afe == NULL || !param_ok(param, value)) { return ESP_ERR_INVALID_ARG; }
@@ -720,6 +767,7 @@ esp_err_t dsp_afe_set_param(dsp_afe_t *afe, dsp_afe_param_t param, float value)
     case DSP_AFE_PARAM_NS_FLOOR_DB:
         afe->cfg.ns_floor_db = value;
         afe->omlsa.floor_db = value;
+        afe->slot_floor = floor_gain(value);
         return ESP_OK;
     case DSP_AFE_PARAM_AGC_TARGET_DBFS: afe->cfg.agc_target_dbfs = value;
 #if CONFIG_DSP_AFE_AGC_ENABLE

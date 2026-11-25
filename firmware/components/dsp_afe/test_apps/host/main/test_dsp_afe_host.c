@@ -698,6 +698,63 @@ static float mean_level_dbfs(const dsp_afe_config_t *cfg, size_t hops, size_t fr
     return afe != NULL ? sum / (float)(hops - from) : 0.0f;
 }
 
+static esp_err_t cut_ns_process(void *ctx, void *state, const float *bins, const float *echo_power,
+                                float *gain, float *speech_prob)
+{
+    (void)ctx;
+    (void)state;
+    (void)bins;
+    (void)echo_power;
+    for (size_t k = 0; k < GEN_GRID_N_BINS; k++) {
+        gain[k] = 0.01f;
+    }
+    *speech_prob = 0.0f;
+    return ESP_OK;
+}
+
+static size_t huge_ns_bytes(void *ctx)
+{
+    (void)ctx;
+    return (size_t)1 << 30;
+}
+
+// A slot that would cut every bin by 40 dB, and one asking more than any region holds.
+static const dsp_afe_ns_ops_t kCutNs = {unit_ns_bytes, unit_ns_init, unit_ns_reset, cut_ns_process};
+static const dsp_afe_ns_ops_t kHugeNs = {huge_ns_bytes, unit_ns_init, unit_ns_reset, cut_ns_process};
+
+static void check_plugged_floor(void)
+{
+    dsp_afe_config_t unit_ns = kPlain;
+    unit_ns.ns = &kUnitNs;
+    dsp_afe_config_t cut_ns = kPlain;
+    cut_ns.ns = &kCutNs;
+    const float drop_db =
+        mean_level_dbfs(&cut_ns, HOPS * 4, HOPS * 2) - mean_level_dbfs(&unit_ns, HOPS * 4, HOPS * 2);
+    char line[160];
+    snprintf(line, sizeof(line),
+             "a plugged slot's gains held at the floor: %.1f dB for a 40 dB cut, floor %.0f dB",
+             (double)drop_db, (double)kPlain.ns_floor_db);
+    check(fabsf(drop_db - kPlain.ns_floor_db) <= 1.0f, line);
+}
+
+static void check_set_ns(void)
+{
+    static int16_t in[GEN_GRID_HOP_SAMPLES * GEN_ARRAY_N_MICS];
+    dsp_afe_config_t unit_ns = kPlain;
+    unit_ns.ns = &kUnitNs;
+    dsp_afe_t *afe = make(&unit_ns);
+    dsp_afe_frame_t out;
+    bool ok = afe != NULL && dsp_afe_set_ns(afe, &kCutNs, NULL) == ESP_OK;
+    ok = ok && dsp_afe_feed(afe, in, 1) == ESP_OK && dsp_afe_fetch(afe, &out) == ESP_OK;
+    ok = ok && dsp_afe_set_ns(afe, NULL, NULL) == ESP_OK;
+    ok = ok && dsp_afe_feed(afe, in, 1) == ESP_OK && dsp_afe_fetch(afe, &out) == ESP_OK;
+    ok = ok && dsp_afe_set_ns(afe, &kHugeNs, NULL) == ESP_ERR_INVALID_SIZE;
+    ok = ok && dsp_afe_set_ns(NULL, &kUnitNs, NULL) == ESP_ERR_INVALID_STATE;
+    check(
+        ok,
+        "dsp_afe_set_ns swaps the floor and a plugged slot between hops, refuses one the region cannot hold");
+}
+
 static void check_ns_floor_in_chain(void)
 {
     dsp_afe_config_t unit_ns = kPlain;
@@ -770,6 +827,8 @@ int main(int argc, char **argv)
 #endif
 #if CONFIG_DSP_AFE_NS_OMLSA_ENABLE
     check_ns_floor_in_chain();
+    check_plugged_floor();
+    check_set_ns();
 #endif
 #if DSP_AFE_HOST_GOLDEN
     if (argc > 1) { run_golden(argv[1]); }
