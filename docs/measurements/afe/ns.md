@@ -692,3 +692,55 @@ trên board B, 200 bước sau 20 bước khởi động, golden 40/40 bước k
 - Mốc của GTCRN đo lại trên board B: 12 391 / 13 840 µs, khớp board C (§10.4) trong 5 µs; UL-UNAS lấy mốc của board C.
 - Phần còn lại: nhân ma trận–vector 2,25 chu kỳ mỗi phép nhân-cộng (5 lệnh nạp, 4 `madd.s` cho 4 hàng); GRU thời gian của
   UL-UNAS chờ PSRAM (§10.6).
+
+### 10.9 Chu kỳ theo khâu, trần bus PSRAM, sigmoid và tanh ngắn hơn (26/11, E9-T16, E9-T20)
+
+App đo riêng chèn bộ đếm chu kỳ quanh từng lời gọi của bản C sau §10.8, trạng thái ở PSRAM như sản phẩm, golden
+`case_000` của từng mạng, 50 bước sau 20 bước khởi động. GTCRN 2,95 triệu chu kỳ mỗi bước, UL-UNAS 5,92 triệu:
+
+| Khâu | GTCRN | UL-UNAS |
+|---|---|---|
+| GRU thời gian (cTFA của UL-UNAS, TRA của GTCRN), phần nhân ma trận–vector | 0,12 M | 1,32 M |
+| hai khối GRU hai đường | 1,31 M | 1,30 M |
+| trong đó cổng GRU, sigmoid và tanh | 0,69 M | 0,69 M |
+| cổng của GRU tần số cTFA | — | 0,33 M |
+| conv 1×1 | 0,30 M | 1,00 M |
+| conv thời gian và ConvTranspose | 0,51 M | 0,69 M |
+| chép hàng đệm và cache trong `temporal` | — | 0,24 M |
+| depthwise | 0,27 M | — |
+
+Trần bus PSRAM trên board B, 16 KB đọc sau khi đẩy khỏi cache:
+
+| Cách đọc | Chu kỳ | MB/s |
+|---|---|---|
+| đọc bằng lần trượt cache | 43 871 | 89,6 |
+| ROM preload rồi chờ xong | 43 121 | 91,2 |
+| `memcpy` PSRAM → RAM trong | 44 636 | 88,1 |
+| `memcpy` RAM trong → PSRAM rồi ghi ngược cache | 85 434 | 46 |
+
+- ROM preload không nhanh hơn lần trượt cache: cả hai chạm cùng trần ~90 MB/s. Preload chỉ giấu được phần tính chồng lên
+  phần đọc.
+- Thử: GRU của mỗi khối tính theo đoạn 8 KB trọng số, preload đoạn sau trong lúc tính đoạn này. GRU thời gian của UL-UNAS
+  1,283 → 1,247 M chu kỳ, GTCRN không đổi: tính một đoạn ~19 µs, đọc nó ~140 µs. Một khối GRU thời gian của UL-UNAS tới
+  73,7 KB, lớn hơn dcache 64 KB, nên không preload trọn được từ đầu khối. Bỏ hướng preload cho hai mạng này.
+- UL-UNAS đọc ~590 KB trọng số mỗi bước: riêng bus đã ~6,6 ms.
+
+Sigmoid và tanh viết lại, bản soi gương trước (`gtcrn_mirror.sigmoid32`, `tanh32`): u = e^−|v| bằng exp minimax bậc 5
+trên |s| ≤ ln2/2 (sai số tương đối 7,5·10⁻⁸, Taylor bậc 6 cũ 1,6·10⁻⁷), n làm tròn bằng cộng trừ 1,5·2²³; mẫu 1 + u
+nằm trong (1, 2], nên nghịch đảo không tách số mũ: hạt giống bậc 2 (sai số 1,0·10⁻²) và hai bước Newton. Sigmoid là
+1/(1 + u) khi v ≥ 0, u/(1 + u) khi v < 0; tanh là (1 − u)/(1 + u) với u = e^−2|v|, mang dấu của v. Bài đo riêng,
+bốn làn, 204 800 giá trị:
+
+| | Chu kỳ, bản §10.8 | Chu kỳ, bản mới | Sai số tuyệt đối lớn nhất, bản §10.8 | bản mới |
+|---|---|---|---|---|
+| sigmoid trên [−90, 90] | 84,6 | 64,3 | 8,7·10⁻⁸ | 9,5·10⁻⁸ |
+| tanh trên [−50, 50] | 88,9 | 70,8 | 1,62·10⁻⁷ | 1,19·10⁻⁷ |
+| tanh trên [−0,01, 0,01] | | | 1,17·10⁻⁷ | 7,8·10⁻⁸ |
+
+Bản soi gương vẫn khớp StreamGTCRN và StreamULUNAS của PyTorch trong ngưỡng cũ trên trọng số ngẫu nhiên; golden hai mạng
+sinh lại; `ns_host`, `make parity-host` khớp từng bit, đối chứng âm đỏ. Board B, golden 40/40 bước khớp:
+
+| Mạng | §10.8, RAM trong | Mới, RAM trong | §10.8, PSRAM | Mới, PSRAM |
+|---|---|---|---|---|
+| GTCRN | 10 794 µs | 9 914 µs | 12 283 µs | 11 404 µs |
+| UL-UNAS | 21 326 µs | 19 925 µs | 24 611 µs | 23 218 µs |
