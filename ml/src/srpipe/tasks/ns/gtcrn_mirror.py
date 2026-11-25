@@ -1,7 +1,7 @@
 """Float32 mirror of ai_engine/src/ns_gtcrn/ (KEHOACH 3.9, ADR-0047): one hop of GTCRN's streaming net on the ns
-slot's complex bins, every multiply-add fused and rounded once as madd.s and fmaf give it, every sum in the order the C
-takes, its own exp and square root, so the C matches it bit for bit. The weights are the pinned checkpoint's, batch
-norms folded into the convolutions in float64, the ERB filter banks kept sparse."""
+slot's complex bins, every multiply-add fused and rounded once as madd.s and fmaf give it, every sum in the order
+the C takes, its own exp, reciprocal and square root, so the C matches it bit for bit. The weights are the pinned
+checkpoint's, batch norms folded into the convolutions in float64, the ERB filter banks kept sparse."""
 
 from __future__ import annotations
 
@@ -24,7 +24,11 @@ LN_EPS = np.float32(1e-8)
 EXP_LIMIT = np.float32(80.0)  # e^±80 stays normal: no subnormal on any chip
 LOG2E, LN2_HI, LN2_LO = np.float32(1.442695041), np.float32(0.693145752), np.float32(1.42860677e-06)
 EXP_POLY = tuple(np.float32(1.0 / math.factorial(k)) for k in range(6, -1, -1))
-SQRT_STEPS = 6  # Newton steps from within a factor of 2: float32 converged
+NEWTON_STEPS = 3  # from a linear first guess: float32 converged
+RECIP_C0, RECIP_C1 = np.float32(48.0 / 17.0), np.float32(32.0 / 17.0)  # 1/m ~ c0 - c1 m on [0.5, 1)
+RSQRT_LOW = (np.float32(1.8284271), np.float32(0.8284271))  # 1/sqrt(m) ~ c0 - c1 m on [0.5, 1)
+RSQRT_HIGH = (np.float32(1.2928932), np.float32(0.2928932))  # and on [1, 2)
+TINY_SQUARE = np.float32(2.0**-100)  # a square under this has a root of 0 for the gains
 BLOB_MAGIC, BLOB_VERSION = 0x31435447, 1  # "GTC1", as ns_gtcrn/gtcrn.c reads it
 GOLDEN_ROOT = ML_ROOT.parent / "contracts" / "golden"
 BLOCK = "ns_gtcrn"
@@ -58,26 +62,51 @@ def exp32(x):
 
 
 @numba.njit(cache=True)
+def recip32(d):
+    """1 / d for a normal d > 0 without a division: d's mantissa from frexp, a linear first guess, NEWTON_STEPS fused
+    Newton steps, and the exponent put back by a power of two."""
+    m64, e = math.frexp(np.float64(d))
+    m = np.float32(m64)
+    y = fma32(-RECIP_C1, m, RECIP_C0)
+    for _ in range(NEWTON_STEPS):
+        y = fma32(y, fma32(-m, y, np.float32(1.0)), y)
+    return np.float32(y * np.float32(2.0 ** (-e)))
+
+
+@numba.njit(cache=True)
+def rsqrt32(v):
+    """1 / sqrt(v) for a normal v > 0 without a division: the mantissa in [0.5, 2) with an even exponent, a linear first
+    guess on its half of that range, NEWTON_STEPS fused Newton steps, and half the exponent put back by a power of
+    two."""
+    m64, e = math.frexp(np.float64(v))
+    m = np.float32(m64)
+    if e % 2 != 0:
+        m = m * np.float32(2.0)
+        e -= 1
+    c0, c1 = RSQRT_LOW if m < np.float32(1.0) else RSQRT_HIGH
+    y = fma32(-c1, m, c0)
+    h = np.float32(0.5) * m
+    for _ in range(NEWTON_STEPS):
+        y = y * fma32(-h, y * y, np.float32(1.5))
+    return np.float32(y * np.float32(2.0 ** (-(e // 2))))
+
+
+@numba.njit(cache=True)
 def sqrt32(v):
-    """Square root by a fixed number of float32 Newton steps from the exponent's halving: 0 for v <= 0."""
-    if v <= 0.0:
+    """v rsqrt32(v); 0 for v at or under TINY_SQUARE."""
+    if v <= TINY_SQUARE:
         return np.float32(0.0)
-    _, e = math.frexp(np.float64(v))
-    y = np.float32(math.ldexp(1.0, e // 2))
-    half = np.float32(0.5)
-    for _ in range(SQRT_STEPS):
-        y = half * (y + np.float32(v) / y)
-    return y
+    return np.float32(v * rsqrt32(v))
 
 
 @numba.njit(cache=True, inline="always")
 def sigmoid32(v):
-    return np.float32(1.0) / (np.float32(1.0) + exp32(-v))
+    return recip32(np.float32(1.0) + exp32(-v))
 
 
 @numba.njit(cache=True, inline="always")
 def tanh32(v):
-    return np.float32(1.0) - np.float32(2.0) / (exp32(np.float32(2.0) * v) + np.float32(1.0))
+    return np.float32(1.0) - np.float32(2.0) * recip32(exp32(np.float32(2.0) * v) + np.float32(1.0))
 
 
 @numba.njit(cache=True)
@@ -171,7 +200,7 @@ def layer_norm(x, w, b):
     for i in range(n):
         d = x[i] - mean
         v = fma32(d, d, v)
-    inv = np.float32(1.0) / sqrt32(v / np.float32(n) + LN_EPS)
+    inv = rsqrt32(v / np.float32(n) + LN_EPS)
     for i in range(n):
         x[i] = fma32((x[i] - mean) * inv, w[i], b[i])
 

@@ -35,11 +35,13 @@ def test_fma32_rounds_the_exact_sum_once() -> None:
     assert np.float32(a * b) + c != gtcrn_mirror.fma32(a, b, c)  # two roundings land elsewhere on a tie
 
 
-def test_exp_and_sqrt_are_float32_close() -> None:
+def test_exp_reciprocal_and_square_root_are_float32_close() -> None:
     for x in np.linspace(-80.0, 80.0, 4001, dtype=np.float32):
         assert abs(float(gtcrn_mirror.exp32(x)) / math.exp(float(x)) - 1.0) < 4e-7
     for v in np.geomspace(1e-30, 1e30, 3001).astype(np.float32):
-        assert abs(float(gtcrn_mirror.sqrt32(v)) / math.sqrt(float(v)) - 1.0) < 2e-7
+        assert abs(float(gtcrn_mirror.sqrt32(v)) / math.sqrt(float(v)) - 1.0) < 3e-7
+        assert abs(float(gtcrn_mirror.rsqrt32(v)) * math.sqrt(float(v)) - 1.0) < 3e-7
+        assert abs(float(gtcrn_mirror.recip32(v)) * float(v) - 1.0) < 2e-7
     assert gtcrn_mirror.sqrt32(np.float32(0.0)) == 0.0
 
 
