@@ -5,11 +5,16 @@ norms folded into the convolutions in float64, the ERB filter banks kept sparse.
 
 from __future__ import annotations
 
+import argparse
 import math
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numba
 import numpy as np
+
+from srpipe.core.config import ML_ROOT
+from srpipe.golden.gold import write_gold
 
 BINS, LOW, ERB_BINS, F1, F2 = 257, 65, 129, 65, 33  # slot bins, unbanded bins, ERB bins, en0's and en1's widths
 CH, HALF, HIDDEN = 16, 8, 16
@@ -20,6 +25,10 @@ EXP_LIMIT = np.float32(80.0)  # e^±80 stays normal: no subnormal on any chip
 LOG2E, LN2_HI, LN2_LO = np.float32(1.442695041), np.float32(0.693145752), np.float32(1.42860677e-06)
 EXP_POLY = tuple(np.float32(1.0 / math.factorial(k)) for k in range(6, -1, -1))
 SQRT_STEPS = 6  # Newton steps from within a factor of 2: float32 converged
+BLOB_MAGIC, BLOB_VERSION = 0x31435447, 1  # "GTC1", as ns_gtcrn/gtcrn.c reads it
+GOLDEN_ROOT = ML_ROOT.parent / "contracts" / "golden"
+BLOCK = "ns_gtcrn"
+GOLDEN_SEED, GOLDEN_HOPS = 20261125, 40
 
 
 @numba.njit(cache=True, inline="always")
@@ -450,3 +459,133 @@ def weights(state_dict: dict) -> Weights:
         de3,
         de4,
     )
+
+
+def _block_arrays(b: Block) -> list:
+    return [b.pc1_w, b.pc1_b, [b.pc1_slope], b.dw_w, b.dw_b, [b.dw_slope], b.pc2_w, b.pc2_b, *b.att, b.att_w, b.att_b]
+
+
+def _dual_arrays(d: DualPath) -> list:
+    out = [a for g in range(2) for direction in range(2) for a in d.intra[g][direction]]
+    out += [*d.intra_fc, *d.intra_ln]
+    out += [a for g in range(2) for a in d.inter[g]]
+    return [*out, *d.inter_fc, *d.inter_ln]
+
+
+def pack(w: Weights) -> bytes:
+    """w as the blob ns_gtcrn reads: magic, version and both banks' tap counts, then every array in the order of
+    gtcrn.c's take_*, int32 for the banks' pointers and indices, float32 for the rest."""
+    arrays = [*w.erb, *w.ierb, *w.en0[:2], [w.en0[2]], *w.en1[:2], [w.en1[2]]]
+    arrays += [a for b in w.enc for a in _block_arrays(b)]
+    arrays += [a for d in w.dps for a in _dual_arrays(d)]
+    arrays += [a for b in w.dec for a in _block_arrays(b)]
+    arrays += [*w.de3[:2], [w.de3[2]], *w.de4[:2], [w.de4[2]]]
+    head = np.array([BLOB_MAGIC, BLOB_VERSION, w.erb[1].size, w.ierb[1].size], np.uint32).tobytes()
+    body = (np.asarray(a, np.int32 if np.asarray(a).dtype.kind == "i" else np.float32).tobytes() for a in arrays)
+    return head + b"".join(body)
+
+
+def random_weights(rng: np.random.Generator) -> Weights:
+    """Weights of GTCRN's shapes drawn from rng, each layer scaled by its fan-in, banks of two or three taps a band:
+    test data for the golden, not a net."""
+
+    def arr(shape, fan_in=1):
+        return (rng.standard_normal(shape) / np.sqrt(fan_in)).astype(np.float32)
+
+    def gru(inp, hid):
+        return (arr((3 * hid, inp), inp), arr((3 * hid, hid), hid), arr(3 * hid, 10), arr(3 * hid, 10))
+
+    def bank(rows, cols):
+        dense_rows = np.zeros((rows, cols), np.float32)
+        for r in range(rows):
+            at, taps = int(rng.integers(0, cols - 3)), int(rng.integers(2, 4))
+            dense_rows[r, at : at + taps] = rng.uniform(0.1, 1.0, taps)
+        return _sparse(dense_rows)
+
+    def block(dil):
+        return Block(
+            arr((CH, 3 * HALF, 1, 1), 24),
+            arr(CH, 10),
+            np.float32(0.25),
+            arr((CH, 1, 3, 3), 9),
+            arr(CH, 10),
+            np.float32(0.2),
+            arr((HALF, CH, 1, 1), 16),
+            arr(HALF, 10),
+            gru(HALF, 2 * HALF),
+            arr((HALF, 2 * HALF), 16),
+            arr(HALF, 10),
+            dil,
+        )
+
+    def dual():
+        ln = (np.float32(1.0) + arr(F2 * CH, 100), arr(F2 * CH, 100))
+        return DualPath(
+            tuple(tuple(gru(HALF, HALF // 2) for _ in range(2)) for _ in range(2)),
+            (arr((CH, CH), 16), arr(CH, 10)),
+            ln,
+            tuple(gru(HALF, HALF) for _ in range(2)),
+            (arr((CH, CH), 16), arr(CH, 10)),
+            (np.float32(1.0) + arr(F2 * CH, 100), arr(F2 * CH, 100)),
+        )
+
+    return Weights(
+        bank(ERB_BINS - LOW, BINS - LOW),
+        bank(BINS - LOW, ERB_BINS - LOW),
+        (arr((CH, 9, 1, 5), 45), arr(CH, 10), np.float32(0.25)),
+        (arr((CH, HALF, 1, 5), 40), arr(CH, 10), np.float32(0.25)),
+        [block(d) for d in DILATIONS],
+        [dual(), dual()],
+        [block(d) for d in DILATIONS[::-1]],
+        (arr((CH, HALF, 1, 5), 40), arr(CH, 10), np.float32(0.25)),
+        (arr((CH, 2, 1, 5), 80), arr(2, 10), np.float32(0.0)),
+    )
+
+
+def case(w: Weights, bins: np.ndarray, off: float = 0.0) -> dict[str, np.ndarray]:
+    """A golden case: the packed weights, every hop's bins as re, im pairs, and the mirror's gains from fresh state;
+    off is added to the first encoder bias before the gains are taken, for a negative control."""
+    blob = np.frombuffer(pack(w), np.uint8).copy()
+    if off:
+        w.en0[1][0] += np.float32(off)
+    st = State()
+    gains = np.stack([step(w, st, b) for b in bins])
+    pairs = np.stack([bins.real, bins.imag], axis=-1).reshape(len(bins), -1).astype(np.float32)
+    return {"weights": blob, "bins": pairs, "gain": gains.astype(np.float32)}
+
+
+def emit(root: Path) -> list[Path]:
+    """Two streams of random bins through random weights, one from board-like levels with silent hops between, then
+    a negative control whose gains come from weights one bias off those stored."""
+    rng = np.random.default_rng(GOLDEN_SEED)
+
+    def stream(level_db):
+        scale = 10.0 ** (rng.uniform(*level_db, (GOLDEN_HOPS, 1)) / 20.0)
+        bins = (rng.standard_normal((GOLDEN_HOPS, BINS)) + 1j * rng.standard_normal((GOLDEN_HOPS, BINS))) * scale
+        return bins.astype(np.complex64)
+
+    quiet = stream((-60.0, -20.0))
+    quiet[5:8] = 0.0
+    cases = {
+        "case_000": case(random_weights(rng), stream((-40.0, 20.0))),
+        "case_001": case(random_weights(rng), quiet),
+        "case_neg_000": case(random_weights(rng), stream((-40.0, 20.0)), off=1e-3),
+    }
+    written = []
+    for name, tensors in cases.items():
+        path = root / BLOCK / f"{name}.gold"
+        write_gold(path, tensors)
+        written.append(path)
+    return written
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--out", type=Path, default=GOLDEN_ROOT)
+    for path in emit(parser.parse_args().out):
+        print(path)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
