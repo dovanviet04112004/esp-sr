@@ -3721,7 +3721,9 @@ và `bench_afe` dùng kênh này.
 
 Board một micro (§2.3) là một lớp chồng lên profile, không phải profile thứ năm. `MICS=1` của `fw-bench` và `product`
 thêm `sdkconfig.mic1` vào cuối danh sách defaults và dựng trong `build_bench_mic1`, để hai bản không dùng chung
-`sdkconfig`. `BOARD=C` làm y như vậy với `sdkconfig.board_c` và `build_bench_c`. `prod` không có luồng tiếng thô: một máy đặt trong phòng không được có đường
+`sdkconfig`. `BOARD=C` làm y như vậy với `sdkconfig.board_c` và `build_bench_c`. `NS=gtcrn` hay `NS=ulunas` của `fw-bench` và `product`
+đặt `AI_ENGINE_NS_BACKEND` bằng một lớp `make` viết vào thư mục dựng riêng của nó (`…_ns<mạng>`), và chỉ khi ấy ảnh model mang
+mục `ns` (§6.3); không có `NS`, bản dựng S3 để `none` (§3.9). `prod` không có luồng tiếng thô: một máy đặt trong phòng không được có đường
 đẩy tiếng người ra ngoài chỉ vì ai đó quên tắt (§7.5).
 
 Chung cả bốn (`sdkconfig.defaults.esp32s3`):
@@ -3761,6 +3763,7 @@ host/
 │   ├── live.py                    # xem trực tiếp: hướng, cờ tiếng nói, mức, sự kiện kèm tên người nói
 │   ├── commands.py                # gửi bộ lệnh xuống down/commands của một board, in lỗi COMMANDS_* board báo về
 │   ├── speakers.py                # gửi danh sách người nói xuống down/speakers, đăng ký giọng, in up/speakers
+│   ├── settings.py                # gửi SET_CONFIG xuống down/cmd của một board, in lỗi CONFIG_* board báo về
 │   ├── vision.py                  # §3.18, §3.19: ghép ảnh từ up/image, in up/detections và up/vision,
 │   │                              #   phục vụ ảnh thị giác qua HTTP, báo down/vision
 │   ├── session.py                 # phiên thu có nhãn: danh sách câu nhắc, mã người nói, mã phiếu đồng ý
@@ -4024,6 +4027,7 @@ Handle nằm ở `main/app_wiring.c` (§4.5.3 luật 12). Mỗi dòng ghi rõ **
 | `s_diverting` | `atomic_bool` trong `svc_listen` | 1 B | `xac_task` | `nhan_task` | — ghi đè | kiểm người nói bật hay đang đăng ký: không thì `nhan_task` không chép, không gửi; một người ghi, một người đọc, một byte |
 | `s_enrolling` | `atomic_bool` trong `svc_listen` | 1 B | `xac_task` | `nhan_task` | — ghi đè | đang đăng ký giọng: ảnh có `wake` thì mọi câu vẫn mở cửa sổ (§5.4); một người ghi, một người đọc, một byte |
 | `s_rearm_gen` | `_Atomic uint32_t` trong `svc_listen` | 4 B | `xac_task` khi lệnh thành `SPEAKER`, `SPEAKER_UNENROLLED`, `SPEAKER_BUSY`; `nhan_task` khi hết ô xác minh (`SPEAKER_BUSY`) | `nhan_task`, `atomic_exchange` trong `svc_listen_feed` | — ghi đè; hai lần ghi trước một lần đọc gộp làm một | thế hệ `LENH` của cửa sổ bị chặn vì người nói, 0 khi cửa sổ mở ở `NGHE`: chỉ cửa sổ của lần thức hiện tại mở lại `LENH`, một lần thử (ADR-0041) |
+| `s_ns_engine` | `_Atomic uint8_t` trong `svc_front` | 1 B | `dieu_task` khi `SET_CONFIG afe/ns_engine` (§7.3) | `sach_task`, đọc mỗi khung trong `svc_front_step`, đổi bản bằng `dsp_afe_set_ns` khi khác bản đang cắm (§3.9) | — ghi đè; hai lần ghi trước một lần đọc gộp làm một | một người ghi, một người đọc, một byte; NVS ghi ở `dieu_task` (nhân 0), `sach_task` không chạm flash |
 | `s_split` | một phần việc trong `ai_engine` (`espdl_split_two.cpp`), chỉ khi `AI_ENGINE_CORES_TWO`: con trỏ hàm, ngữ cảnh, trạng thái nguyên tử; thông báo task tới `phu_task` | ~16 B | task chạy mạng | `phu_task` | không bao giờ đầy, mỗi lần một phần việc. Task khác đang giữ nó thì op chạy cả hai phần ở chỗ. Task giao xong phần 0 mà `phu_task` chưa nhận phần 1 thì tự làm phần ấy | trạng thái nguyên tử thay khoá: task giao không chờ `phu_task` bắt đầu, chỉ chờ phần nó đã nhận, lâu nhất phần ấy cộng một khung của `sach` |
 | `s_latest` | `portMUX_TYPE` + `sensors_t` trong `svc_sensors`, chỉ có khi `APP_SENSORS_ENABLE` | ~100 B | `do_task`, mỗi lần đọc | `nhin_task` qua `svc_sensors_latest` | — ghi đè | số đo là **mức**: mục nhật ký cần lần đọc mới nhất, không cần chuỗi. Chép dưới spinlock, ~100 byte, không gọi gì bên trong |
 | `s_clock` | `portMUX_TYPE` + độ lệch giờ UTC − giờ máy, ứng viên lớn nhất và đầu khoảng của `clock.window_s`, trong `sys_time` | ~40 B | `do_task` qua `sys_time_offer` | `do_task`, `nhin_task` qua `sys_time_utc_ms` | — ghi đè | độ lệch là **mức**: giờ chụp cần độ lệch mới nhất. Vài phép gán dưới spinlock; `settimeofday` gọi sau khi nhả khoá |
@@ -4376,6 +4380,9 @@ chưa chọn ngưỡng, bước đóng gói ghi cả hai vào header, và lúc b
 Của `ns` có thêm trường `backend` (`rnnoise` | `nsnet` | `gtcrn` | `ulunas`, §3.9): bước đóng gói đặt tên mục trong ảnh theo nó
 (`ns_rnnoise`, `ns_nsnet`, `ns_gtcrn` hay `ns_ulunas`), nên bản dựng của mạng khác không tìm thấy model, `ai_engine_ns_ops()` trả
 `NULL` và chuỗi chạy sàn. Mục `ns_gtcrn` và `ns_ulunas` là trọng số float32 của checkpoint ghim, không phải `.espdl` (ADR-0047, ADR-0048).
+Khoá model giữ một hàng `ns`, của mạng chính (`ulunas`); bước đóng gói chỉ đưa hàng ấy vào ảnh khi được gọi với đúng mạng
+ấy (`pack_models --ns <mạng>`, `make product NS=<mạng>`), và từ chối khi hàng khoá mạng khác. Mặc định bỏ hàng `ns`, nên bản
+dựng không mang mạng không giữ trọng số vô ích trong PSRAM.
 
 **`grid_hash` chặn lệch lúc huấn luyện và lúc chạy.** Firmware biên dịch với băm của `grid.yaml`
 trong `gen_grid.h`; ảnh model mang băm của lưới nó được huấn luyện. Khác nhau thì `ai_engine_load`
@@ -4598,6 +4605,11 @@ lệnh, ≤ 120 KB, trên `up/voice`; topic ấy vào `contracts/mqtt_topics.yam
 
 Callback của esp-mqtt chỉ phân tích payload rồi bỏ vào `q_cmd`, `q_cmdset` hoặc `q_spkset` (§5.3); không làm việc
 dài, không ghi flash trong callback.
+
+`SET_CONFIG` nhận khoá `afe/ns_engine` (0 là sàn, 1 là mạng đã dựng, §3.9), gửi bằng `make settings DEVICE=<deviceId>
+KEY=afe/ns_engine VALUE=<0|1>`: `dieu_task` ghi NVS rồi báo `svc_front`, và `sach_task` đổi bản ở khung sau. Khoá khác hay
+giá trị ngoài 0, 1 ra `ERROR CONFIG_REFUSED`, NVS không nhận thì `ERROR CONFIG_NOT_SAVED` và giá trị vẫn dùng tới lần khởi
+động sau. Các khoá còn lại của §6.2 tới ở E13-T7.
 
 **Gửi lại tin QoS 1.** esp-mqtt gửi lại tin chưa được xác nhận sau `session.message_retransmit_timeout`, mặc định của thư viện là 1 s. Chuỗi nghe (ưu tiên 10) giành CPU của `mqtt_task` (ưu tiên 5) ~1,1 s sau mỗi lượt `detect`, tới 3 s ở mức tồi nhất (`q_clean` của board C, §5.3), nên xác nhận đến muộn và `detections`, `event` hay khúc ảnh đi hai lần (đo 09/11: 3 bản trùng trong 5 lượt). `NET_MQTT_RETRANSMIT_MS` đặt 5 000 ms, trên 3 s ấy và dưới 30 s hết hạn của outbox. Máy nhận vẫn phải chịu được bản trùng (§7.7): gửi lại lúc nối lại là việc bình thường.
 
