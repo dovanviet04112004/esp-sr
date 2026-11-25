@@ -76,7 +76,8 @@ bss:                                # direction gate on doa's angle (KEHOACH 3.8
   history_s: 0.0                   # delayed output: seconds of held angles kept for old hops; product 0
   lookahead_s: 0.1                  # delayed output: an old hop's gate takes the angle held this long after it; 0.15 s and more lose turn ends when talkers answer without a pause
 ns:
-  floor_db: -12.0                     # seed of NVS afe/ns_floor_db: G_min of OM-LSA
+  floor_db: -12.0                     # seed of NVS afe/ns_floor_db: G_min of OM-LSA, a plugged net's floor
+  engine: 0                           # seed of NVS afe/ns_engine: 0 the floor, 1 the net the build carries
   echo_floor_db: -40.0                # where the residual echo of aec rules a bin (KEHOACH 3.9)
   # OM-LSA with IMCRA (KEHOACH 3.9) as the author's omlsa.m of 2003: 'medium' non-stationarity, broadband decision,
   # no tone removal. The paper's smoothing factors at 8 ms are time constants here; at 16 ms they square.
