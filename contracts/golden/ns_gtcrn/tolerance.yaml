@@ -1,0 +1,8 @@
+# C ai_engine/src/ns_gtcrn/gtcrn.c against srpipe.tasks.ns.gtcrn_mirror (KEHOACH 3.9, ADR-0047), bit for bit: both
+# fuse every multiply-add into one rounding, sum in the same order, and take their own exp and square root from the
+# same float32 steps. Random weights of GTCRN's shapes, not the checkpoint; case_neg_000's gains come from weights
+# one encoder bias off the blob it stores.
+tensors:
+  gain:
+    max_abs: 0.0
+    min_snr_db: 0.0
