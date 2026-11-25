@@ -611,3 +611,21 @@ Hai phép thử sau vòng 1, cùng phép đo, bản đếm chu kỳ dựng riên
   chỉ riêng phần đọc ấy đã cỡ 10 ms 🔬; tham số AffinePReLU theo từng kênh và từng vạch thêm ~96 KB mỗi bước.
 - ROM preload là một bộ duy nhất cho dcache chung của hai nhân, nên `ns` trên nhân 1 dùng nó phải tránh các op esp-dl trên
   nhân 0 đang dùng (ADR-0026).
+
+### 10.7 Hai mạng trong chuỗi thật trên board B (25/11, E9-T18)
+
+Bản `bench` của sản phẩm, board B hai micro không loa (chuỗi `MM`), dựng bằng `make product NS=ulunas` rồi `NS=gtcrn`. NVS
+`afe/ns_engine` đặt qua console (`nvs set afe ns_engine 1 -t u8`), vì máy tính và board ở hai mạng Wi-Fi khác nhau nên
+`SET_CONFIG` chưa đi tới board. Log serial 45–50 s sau mỗi lần khởi động:
+
+| Bản dựng | Dòng khởi động | Stack `sach_task` còn (của 6 144 B) | Watchdog |
+|---|---|---|---|
+| `NS=ulunas`, `afe/ns_engine 0` | `afe: ns floor (afe/ns_engine 0, net built)` | 4 400 B | không |
+| `NS=ulunas`, `afe/ns_engine 1` | `afe: ns net (afe/ns_engine 1, net built)` | 1 456 B | IDLE1 không chạy, mỗi 5 s |
+| `NS=gtcrn`, `afe/ns_engine 1` | `afe: ns net (afe/ns_engine 1, net built)` | 3 904 B | IDLE1 không chạy, 9 lần trong 50 s |
+| không `NS` | `afe: ns floor (afe/ns_engine 0, net absent)` | — | không |
+
+- Đường khởi động của công tắc đúng: NVS chọn sàn hay mạng, bản không mang mạng chạy sàn bất kể NVS.
+- Cả hai mạng chiếm trọn nhân 1: UL-UNAS 24,2–27,4 ms (§10.6), GTCRN 12,4–13,8 ms (§10.4) cộng phần còn lại của chuỗi hai
+  micro đã quá nhịp 16 ms. Watchdog của bản dựng chỉ cảnh báo, không khởi động lại, nên board không kẹt; chuỗi bỏ khung.
+- Bản dựng S3 vì thế để `none`, như KẾ HOẠCH §3.9; board B trả về bản ấy. UL-UNAS dùng ~4,7 KB stack của `sach_task`.
