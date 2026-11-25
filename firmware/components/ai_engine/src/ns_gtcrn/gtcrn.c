@@ -124,17 +124,48 @@ static inline __attribute__((always_inline)) float act_of(float acc, act_t act, 
     return act == ACT_TANH ? tanh32(acc) : acc;
 }
 
-// A 1x1 convolution: x is (cin, nf), w (cout, cin); four outputs at a time, each summed over ci in order.
+// A 1x1 convolution: x is (cin, nf), w (cout, cin), cout a multiple of 4; four outputs by two positions at a
+// time share their loads, each output summed over ci in order.
 static void pointwise(const float *x, int cin, int nf, const ai_engine_gtcrn_conv_t *c, int cout, act_t act,
                       float *out)
 {
-    int co = 0;
-    for (; co + 4 <= cout; co += 4) {
+    for (int co = 0; co < cout; co += 4) {
         const float *w0 = c->w + co * cin;
         const float *w1 = w0 + cin;
         const float *w2 = w1 + cin;
         const float *w3 = w2 + cin;
-        for (int f = 0; f < nf; f++) {
+        int f = 0;
+        for (; f + 2 <= nf; f += 2) {
+            float a0 = c->b[co];
+            float a1 = c->b[co + 1];
+            float a2 = c->b[co + 2];
+            float a3 = c->b[co + 3];
+            float b0 = a0;
+            float b1 = a1;
+            float b2 = a2;
+            float b3 = a3;
+            for (int ci = 0; ci < cin; ci++) {
+                const float v = x[ci * nf + f];
+                const float u = x[ci * nf + f + 1];
+                a0 = fmaf(w0[ci], v, a0);
+                b0 = fmaf(w0[ci], u, b0);
+                a1 = fmaf(w1[ci], v, a1);
+                b1 = fmaf(w1[ci], u, b1);
+                a2 = fmaf(w2[ci], v, a2);
+                b2 = fmaf(w2[ci], u, b2);
+                a3 = fmaf(w3[ci], v, a3);
+                b3 = fmaf(w3[ci], u, b3);
+            }
+            out[co * nf + f] = act_of(a0, act, c->slope);
+            out[co * nf + f + 1] = act_of(b0, act, c->slope);
+            out[(co + 1) * nf + f] = act_of(a1, act, c->slope);
+            out[(co + 1) * nf + f + 1] = act_of(b1, act, c->slope);
+            out[(co + 2) * nf + f] = act_of(a2, act, c->slope);
+            out[(co + 2) * nf + f + 1] = act_of(b2, act, c->slope);
+            out[(co + 3) * nf + f] = act_of(a3, act, c->slope);
+            out[(co + 3) * nf + f + 1] = act_of(b3, act, c->slope);
+        }
+        for (; f < nf; f++) {
             float a0 = c->b[co];
             float a1 = c->b[co + 1];
             float a2 = c->b[co + 2];
@@ -150,15 +181,6 @@ static void pointwise(const float *x, int cin, int nf, const ai_engine_gtcrn_con
             out[(co + 1) * nf + f] = act_of(a1, act, c->slope);
             out[(co + 2) * nf + f] = act_of(a2, act, c->slope);
             out[(co + 3) * nf + f] = act_of(a3, act, c->slope);
-        }
-    }
-    for (; co < cout; co++) {
-        for (int f = 0; f < nf; f++) {
-            float a = c->b[co];
-            for (int ci = 0; ci < cin; ci++) {
-                a = fmaf(c->w[co * cin + ci], x[ci * nf + f], a);
-            }
-            out[co * nf + f] = act_of(a, act, c->slope);
         }
     }
 }
@@ -182,7 +204,42 @@ static void conv_k5s2(const float *x, int fin, const ai_engine_gtcrn_conv_t *c, 
         const float *w1 = w0 + per_in * 5;
         const float *w2 = w1 + per_in * 5;
         const float *w3 = w2 + per_in * 5;
-        for (int fo = 0; fo < fout; fo++) {
+        int fo = 0;
+        for (; fo + 2 <= fout; fo += 2) {
+            float a0 = c->b[co];
+            float a1 = c->b[co + 1];
+            float a2 = c->b[co + 2];
+            float a3 = c->b[co + 3];
+            float b0 = a0;
+            float b1 = a1;
+            float b2 = a2;
+            float b3 = a3;
+            for (int ci = 0; ci < per_in; ci++) {
+                const float *v = pad + (g * per_in + ci) * width + 2 * fo;
+                const int at = ci * 5;
+                for (int k = 0; k < 5; k++) {
+                    const float p = v[k];
+                    const float q = v[k + 2];
+                    a0 = fmaf(w0[at + k], p, a0);
+                    b0 = fmaf(w0[at + k], q, b0);
+                    a1 = fmaf(w1[at + k], p, a1);
+                    b1 = fmaf(w1[at + k], q, b1);
+                    a2 = fmaf(w2[at + k], p, a2);
+                    b2 = fmaf(w2[at + k], q, b2);
+                    a3 = fmaf(w3[at + k], p, a3);
+                    b3 = fmaf(w3[at + k], q, b3);
+                }
+            }
+            out[co * fout + fo + 1] = act_of(b0, ACT_PRELU, c->slope);
+            out[(co + 1) * fout + fo + 1] = act_of(b1, ACT_PRELU, c->slope);
+            out[(co + 2) * fout + fo + 1] = act_of(b2, ACT_PRELU, c->slope);
+            out[(co + 3) * fout + fo + 1] = act_of(b3, ACT_PRELU, c->slope);
+            out[co * fout + fo] = act_of(a0, ACT_PRELU, c->slope);
+            out[(co + 1) * fout + fo] = act_of(a1, ACT_PRELU, c->slope);
+            out[(co + 2) * fout + fo] = act_of(a2, ACT_PRELU, c->slope);
+            out[(co + 3) * fout + fo] = act_of(a3, ACT_PRELU, c->slope);
+        }
+        for (; fo < fout; fo++) {
             float a0 = c->b[co];
             float a1 = c->b[co + 1];
             float a2 = c->b[co + 2];
@@ -295,6 +352,55 @@ static void deconv(const float *x, int cin, int fin, const ai_engine_gtcrn_conv_
     }
 }
 
+// Rows of one GRU's gates: out[r] = bias[r] + w[r] . v over n inputs in order, four rows at a time.
+static inline __attribute__((always_inline)) void gate_rows(const float *w, const float *bias, int rows,
+                                                            int n, const float *v, float *out)
+{
+    for (int r = 0; r < rows; r += 4) {
+        const float *w0 = w + r * n;
+        float a0 = bias[r];
+        float a1 = bias[r + 1];
+        float a2 = bias[r + 2];
+        float a3 = bias[r + 3];
+#pragma GCC unroll 16
+        for (int i = 0; i < n; i++) {
+            const float x = v[i];
+            a0 = fmaf(w0[i], x, a0);
+            a1 = fmaf(w0[n + i], x, a1);
+            a2 = fmaf(w0[2 * n + i], x, a2);
+            a3 = fmaf(w0[3 * n + i], x, a3);
+        }
+        out[r] = a0;
+        out[r + 1] = a1;
+        out[r + 2] = a2;
+        out[r + 3] = a3;
+    }
+}
+
+// count GRUs of hid units, their gate rows in gi and gh, (3 hid) apart: h' = n + z (h - n) into out, gates as
+// gru_step takes them, each kind for every GRU in one loop.
+static void gates(int count, int hid, const float *gi, const float *gh, const float *h, int h_stride,
+                  float *rz, float *n, float *out, int out_stride)
+{
+    for (int q = 0; q < count; q++) {
+        for (int j = 0; j < 2 * hid; j++) {
+            rz[q * 2 * hid + j] = sigmoid32(gi[q * 3 * hid + j] + gh[q * 3 * hid + j]);
+        }
+    }
+    for (int q = 0; q < count; q++) {
+        for (int j = 0; j < hid; j++) {
+            const int at = q * 3 * hid + 2 * hid + j;
+            n[q * hid + j] = tanh32(fmaf(rz[q * 2 * hid + j], gh[at], gi[at]));
+        }
+    }
+    for (int q = 0; q < count; q++) {
+        for (int j = 0; j < hid; j++) {
+            const float nj = n[q * hid + j];
+            out[q * out_stride + j] = fmaf(rz[q * 2 * hid + hid + j], h[q * h_stride + j] - nj, nj);
+        }
+    }
+}
+
 // Inlined at every call, whose sizes are constants, so its loops unroll.
 static inline __attribute__((always_inline)) void gru_step(const ai_engine_gtcrn_gru_t *g, int in, int hid,
                                                            const float *x, const float *h, float *out)
@@ -337,12 +443,16 @@ static inline __attribute__((always_inline)) void gru_step(const ai_engine_gtcrn
         gh[r + 2] = c2;
         gh[r + 3] = c3;
     }
-#pragma GCC unroll 8
+    float rz[2 * 2 * HALF];
+    float n[2 * HALF];
+    for (int j = 0; j < 2 * hid; j++) {
+        rz[j] = sigmoid32(gi[j] + gh[j]);
+    }
     for (int j = 0; j < hid; j++) {
-        const float rg = sigmoid32(gi[j] + gh[j]);
-        const float zg = sigmoid32(gi[hid + j] + gh[hid + j]);
-        const float n = tanh32(fmaf(rg, gh[2 * hid + j], gi[2 * hid + j]));
-        out[j] = fmaf(zg, h[j] - n, n);
+        n[j] = tanh32(fmaf(rz[j], gh[2 * hid + j], gi[2 * hid + j]));
+    }
+    for (int j = 0; j < hid; j++) {
+        out[j] = fmaf(rz[hid + j], h[j] - n[j], n[j]);
     }
 }
 
@@ -470,16 +580,36 @@ static void run_dual(const ai_engine_gtcrn_dual_t *dp, ai_engine_gtcrn_state_t *
         }
     }
     const int quarter = HALF / 2;
-    for (int g = 0; g < 2; g++) {
-        for (int dir = 0; dir < 2; dir++) {
-            float h[HALF / 2] = {0};
-            float fresh[HALF / 2];
-            for (int n = 0; n < F2; n++) {
-                const int f = dir == 0 ? n : F2 - 1 - n;
-                gru_step(&dp->intra[g][dir], HALF, quarter, t + f * CH + g * HALF, h, fresh);
-                memcpy(h, fresh, sizeof(h));
-                memcpy(y + f * CH + g * HALF + dir * quarter, h, sizeof(h));
-            }
+    const int rows4 = 3 * quarter;
+    float *gi = st->gi;
+    for (int f = 0; f < F2; f++) {
+        for (int s = 0; s < 4; s++) {
+            const int g = s >> 1;
+            const int dir = s & 1;
+            gate_rows(dp->intra[g][dir].wih, dp->intra[g][dir].bih, rows4, HALF, t + f * CH + g * HALF,
+                      gi + (f * 4 + s) * rows4);
+        }
+    }
+    float h4[4 * HALF / 2] = {0};
+    float gh4[4 * 3 * HALF / 2];
+    float gi4[4 * 3 * HALF / 2];
+    float fresh[4 * HALF / 2];
+    for (int step = 0; step < F2; step++) {
+        for (int s = 0; s < 4; s++) {
+            const int g = s >> 1;
+            const int dir = s & 1;
+            const int f = dir == 0 ? step : F2 - 1 - step;
+            gate_rows(dp->intra[g][dir].whh, dp->intra[g][dir].bhh, rows4, quarter, h4 + s * quarter,
+                      gh4 + s * rows4);
+            memcpy(gi4 + s * rows4, gi + (f * 4 + s) * rows4, rows4 * sizeof(float));
+        }
+        gates(4, quarter, gi4, gh4, h4, quarter, st->rz, st->nn, fresh, quarter);
+        memcpy(h4, fresh, sizeof(h4));
+        for (int s = 0; s < 4; s++) {
+            const int g = s >> 1;
+            const int dir = s & 1;
+            const int f = dir == 0 ? step : F2 - 1 - step;
+            memcpy(y + f * CH + g * HALF + dir * quarter, h4 + s * quarter, quarter * sizeof(float));
         }
     }
     for (int f = 0; f < F2; f++) {
@@ -489,12 +619,17 @@ static void run_dual(const ai_engine_gtcrn_dual_t *dp, ai_engine_gtcrn_state_t *
     for (int i = 0; i < PLANE; i++) {
         t[i] = t[i] + u[i];
     }
+    const int rows8 = 3 * HALF;
+    float *gh = st->gh;
     for (int f = 0; f < F2; f++) {
         for (int g = 0; g < 2; g++) {
-            gru_step(&dp->inter[g], HALF, HALF, t + f * CH + g * HALF, inter + f * CH + g * HALF,
-                     st->hn + f * CH + g * HALF);
+            const int q = f * 2 + g;
+            gate_rows(dp->inter[g].wih, dp->inter[g].bih, rows8, HALF, t + f * CH + g * HALF, gi + q * rows8);
+            gate_rows(dp->inter[g].whh, dp->inter[g].bhh, rows8, HALF, inter + f * CH + g * HALF,
+                      gh + q * rows8);
         }
     }
+    gates(2 * F2, HALF, gi, gh, inter, HALF, st->rz, st->nn, st->hn, HALF);
     memcpy(inter, st->hn, PLANE * sizeof(float));
     for (int f = 0; f < F2; f++) {
         dense(dp->inter_fc_w, dp->inter_fc_b, CH, CH, st->hn + f * CH, u + f * CH);

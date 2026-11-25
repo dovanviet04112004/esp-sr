@@ -87,6 +87,10 @@ typedef struct {
     float t[AI_ENGINE_GTCRN_PLANE];
     float u[AI_ENGINE_GTCRN_PLANE];
     float hn[AI_ENGINE_GTCRN_PLANE];
+    float gi[2 * AI_ENGINE_GTCRN_F2 * 3 * AI_ENGINE_GTCRN_HALF]; // gate rows of every GRU of a pass
+    float gh[2 * AI_ENGINE_GTCRN_F2 * 3 * AI_ENGINE_GTCRN_HALF];
+    float rz[2 * AI_ENGINE_GTCRN_F2 * 2 * AI_ENGINE_GTCRN_HALF];
+    float nn[2 * AI_ENGINE_GTCRN_F2 * AI_ENGINE_GTCRN_HALF];
     float m1[AI_ENGINE_GTCRN_CH * AI_ENGINE_GTCRN_F1];
     float m2[2 * AI_ENGINE_GTCRN_ERB];
     float mask[2 * AI_ENGINE_GTCRN_BINS];
