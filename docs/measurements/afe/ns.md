@@ -744,3 +744,23 @@ sinh lại; `ns_host`, `make parity-host` khớp từng bit, đối chứng âm 
 |---|---|---|---|---|
 | GTCRN | 10 794 µs | 9 914 µs | 12 283 µs | 11 404 µs |
 | UL-UNAS | 21 326 µs | 19 925 µs | 24 611 µs | 23 218 µs |
+
+### 10.10 GTCRN vừa nhịp nhân 1 trong chuỗi thật trên board B (26/11, E9-T16, E9-T18)
+
+Bản C sau §10.9 (GTCRN 11,4 ms một bước với trạng thái ở PSRAM), `make ns-gtcrn-deploy` tạm vào khoá ở bản làm việc,
+`make product NS=gtcrn` trên board B (chuỗi `MM`, không loa), board và máy tính cùng mạng. Heartbeat 30 s một lần:
+
+| Lúc (UTC) | `ns` | `framesDropped` tăng | Ghi chú |
+|---|---|---|---|
+| 18:40:52, 18:41:22 | sàn | 0, 0 | |
+| `SET_CONFIG afe/ns_engine 1` lúc 18:41:39 | | | |
+| 18:41:52 … 18:43:52, năm heartbeat | GTCRN | 0 mỗi lần | |
+| `SET_CONFIG afe/ns_engine 0` lúc 18:44:14 | | | |
+| 18:44:22 … 18:45:22 | sàn | 0 mỗi lần | |
+
+- Đặt `1` rồi reset: dòng khởi động `afe: ns net (afe/ns_engine 1, net built)`; 75 s log serial không có dòng `task_wdt`
+  nào (§10.7 trước tối ưu: IDLE1 bị bỏ đói 9 lần trong 50 s); ba heartbeat sau đó `framesDropped` vẫn 0 từ lúc khởi động.
+- Hai lần đổi sàn ↔ GTCRN lúc chạy không mất khung nào: điều kiện của E9-T18 mà UL-UNAS che mất ở §10.7.1.
+- `cleanDropped`, `eventsDropped`, `streamDropped`, `dmaOverflows` 0 suốt lượt; PSRAM trống giữ 3 961 732 B.
+- Chưa đo trên board C (chuỗi `MR` có `aec`, phần còn lại của chuỗi ~3,7 ms theo §10.4) 🔬.
+- Board B trả về bản không `NS`, khoá trả về hàng UL-UNAS đã commit.
