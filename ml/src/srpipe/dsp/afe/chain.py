@@ -49,7 +49,7 @@ class ChainConfig:
     spatial is dsp_afe_config_t.spatial: none for the mean, gsc steered by doa (broadside while it has no angle), bss
     gated on doa's angle with bss's settings, None for contracts/afe.yaml's. agc_start_db, simulation only, is the
     agc's first gain (KEHOACH 1.2), None as the firmware; aec_delay_samples is calib/aec_delay; ns_slot makes the ns
-    slot in place of the floor at start and at every reset (KEHOACH 3.9)."""
+    slot in place of the floor at start and at every reset, its gains held at ns_floor_db or above (KEHOACH 3.9)."""
 
     modules: tuple[str, ...] = afe.MODULES
     balance_gains: np.ndarray | None = None
@@ -144,6 +144,7 @@ class Chain:
         self._last_vad = False
         self._ns = None
         self._ns_slot = self.cfg.ns_slot() if self.cfg.ns_slot is not None else None
+        self._slot_floor = np.float32(10.0 ** (float(self.cfg.ns_floor_db) / 20.0))
         if "ns_omlsa" in on and self._ns_slot is None:
             self._ns = ns_omlsa.Omlsa()
             self._ns.set_floor(self.cfg.ns_floor_db)
@@ -220,7 +221,8 @@ class Chain:
             mixed = np.float32(0.5) * (bins[0] + bins[1])
         gains = None
         if self._ns_slot is not None:
-            gains = np.asarray(self._ns_slot.gains(mixed, echo_power), dtype=np.float32)
+            # Every plugged slot shares OM-LSA's floor (KEHOACH 3.9, ADR-0048).
+            gains = np.maximum(np.asarray(self._ns_slot.gains(mixed, echo_power), dtype=np.float32), self._slot_floor)
         elif self._ns is not None:
             gains = self._ns.process(mixed.real * mixed.real + mixed.imag * mixed.imag, echo_power).gain
         if gains is not None:
