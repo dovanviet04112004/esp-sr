@@ -22,9 +22,13 @@ typedef struct {
     float ns_floor_db;
     float agc_target_dbfs;
     uint8_t vad_aggressiveness;
+    const dsp_afe_ns_ops_t *ns_net; // ai_engine_ns_ops(): the built ns net, NULL without one
+    uint8_t ns_engine;              // NVS afe/ns_engine: 0 the floor, 1 the net
 } svc_front_config_t;
 
-/** Build dsp_afe with hot memory in internal RAM and cold memory in PSRAM, allocated once here.
+/** Build dsp_afe with hot memory in internal RAM and cold memory in PSRAM, allocated once here; the ns slot
+ * holds the net when ns_engine asks for it and the chain has no reference to the speaker, else the floor
+ * (KEHOACH 3.9).
  *  @ctx task | blocking, allocates | once at boot, ahead of sach_task
  *  @ret ESP_OK | ESP_ERR_INVALID_STATE on a second call | ESP_ERR_NO_MEM | whatever dsp_afe_init refuses
  */
@@ -37,6 +41,19 @@ esp_err_t svc_front_init(const svc_front_config_t *cfg);
  *  @ret ESP_OK, a frame in out | ESP_ERR_NOT_FOUND nothing ready | ESP_ERR_INVALID_STATE no init yet
  */
 esp_err_t svc_front_step(const int16_t *interleaved, uint32_t seq, dsp_afe_frame_t *out);
+
+/** Ask for the floor (0) or the built net (1) in the ns slot; sach_task swaps between two hops
+ * (KEHOACH 3.9, 5.3).
+ *  @ctx any | non-blocking, one atomic store
+ *  @ret ESP_OK | ESP_ERR_INVALID_ARG engine past 1 | ESP_ERR_NOT_SUPPORTED a net asked of a build or chain
+ * without
+ */
+esp_err_t svc_front_request_ns(uint8_t engine);
+
+/** The ns implementation the slot runs: 0 the floor, 1 the net.
+ *  @ctx any | non-blocking
+ */
+uint8_t svc_front_ns_engine(void);
 
 /** Copy the counters of the dsp_afe instance.
  *  @ctx any | non-blocking | a torn read across tasks is possible and harmless

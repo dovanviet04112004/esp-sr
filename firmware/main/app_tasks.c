@@ -499,6 +499,20 @@ static void act_on(const app_wiring_t *w, const app_event_t *heard)
     if (strcmp(heard->command_id, GEN_VISION_COMMAND_JOURNAL) == 0) { capture_for(w, APP_VISION_JOURNAL); }
 }
 
+// SET_CONFIG takes afe/ns_engine for now (KEHOACH 7.3): NVS first, then sach_task swaps on its next hop.
+static void set_config(const app_wiring_t *w, const device_cmd_t *cmd)
+{
+    const bool ns_engine = cmd->has_key && cmd->has_value && strcmp(cmd->key, "afe/ns_engine") == 0;
+    if (!ns_engine || cmd->value < 0 || svc_front_request_ns((uint8_t)cmd->value) != ESP_OK) {
+        raise_error(w, 0, APP_CODE_CONFIG_REFUSED, NULL);
+        return;
+    }
+    if (sys_storage_set_u8(STORAGE_NS_AFE, STORAGE_KEY_NS_ENGINE, (uint8_t)cmd->value) != ESP_OK) {
+        raise_error(w, 0, APP_CODE_CONFIG_NOT_SAVED, NULL);
+    }
+    ESP_LOGI(TAG, "afe/ns_engine %d asked", (int)cmd->value);
+}
+
 static void dieu_task(void *arg)
 {
     const app_wiring_t *w = arg;
@@ -512,6 +526,8 @@ static void dieu_task(void *arg)
                 enrol_from(w, &cmd);
             } else if (cmd.op == DEVICE_CMD_OP_CAPTURE) {
                 capture_for(w, vision_mode(cmd.capture_mode));
+            } else if (cmd.op == DEVICE_CMD_OP_SET_CONFIG) {
+                set_config(w, &cmd);
             }
         }
         esp_task_wdt_reset();

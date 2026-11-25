@@ -40,6 +40,8 @@ extern "C" {
 #define APP_CODE_VISION_BUSY "VISION_BUSY"               // a capture is running, this one is refused
 #define APP_CODE_CAMERA_FAIL "CAMERA_FAIL"               // no camera, or it gave no frame
 #define APP_CODE_DETECT_FAIL "DETECT_FAIL"               // the picture left, detect did not run
+#define APP_CODE_CONFIG_REFUSED "CONFIG_REFUSED"         // SET_CONFIG of a key or value not taken
+#define APP_CODE_CONFIG_NOT_SAVED "CONFIG_NOT_SAVED"     // in use until reboot, NVS old
 
 #ifdef __cplusplus
 }

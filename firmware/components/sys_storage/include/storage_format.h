@@ -37,6 +37,7 @@
 #define STORAGE_KEY_NS_FLOOR_DB "ns_floor_db"         // i8
 #define STORAGE_KEY_AGC_TARGET_DBFS "agc_target_dbfs" // i8
 #define STORAGE_KEY_VAD_MODE "vad_mode"               // u8
+#define STORAGE_KEY_NS_ENGINE "ns_engine"             // u8: 0 the floor, 1 the built ns net
 #define STORAGE_KEY_WAKE_TH "wake_th"                 // u16, permille
 #define STORAGE_KEY_WAKE_SEED "wake_seed"             // u16, permille: the threshold last seeded
 #define STORAGE_KEY_CMD_REJECT "cmd_reject"           // u16
@@ -64,7 +65,8 @@ _Static_assert(
         STORAGE_NVS_NAME_FITS(STORAGE_KEY_NS_FLOOR_DB) && STORAGE_NVS_NAME_FITS(STORAGE_KEY_BOOT_COUNT) &&
         STORAGE_NVS_NAME_FITS(STORAGE_KEY_CMD_REJECT) && STORAGE_NVS_NAME_FITS(STORAGE_KEY_CMD_MARGIN) &&
         STORAGE_NVS_NAME_FITS(STORAGE_KEY_CMD_SYLLABLE) && STORAGE_NVS_NAME_FITS(STORAGE_KEY_CMD_SEEDS) &&
-        STORAGE_NVS_NAME_FITS(STORAGE_KEY_SPK_TPL_MODEL) && STORAGE_NVS_NAME_FITS(STORAGE_KEY_WAKE_SEED),
+        STORAGE_NVS_NAME_FITS(STORAGE_KEY_SPK_TPL_MODEL) && STORAGE_NVS_NAME_FITS(STORAGE_KEY_WAKE_SEED) &&
+        STORAGE_NVS_NAME_FITS(STORAGE_KEY_NS_ENGINE),
     "an NVS name holds at most 15 characters");
 
 #define STORAGE_CALIB_BAL_VERSION 1

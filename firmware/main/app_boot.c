@@ -93,6 +93,7 @@ static void seed_operating(void)
         {STORAGE_NS_AFE, STORAGE_KEY_NS_FLOOR_DB, SYS_STORAGE_I8, lrintf(GEN_AFE_NS_FLOOR_DB)},
         {STORAGE_NS_AFE, STORAGE_KEY_AGC_TARGET_DBFS, SYS_STORAGE_I8, lrintf(GEN_AFE_AGC_TARGET_DBFS)},
         {STORAGE_NS_AFE, STORAGE_KEY_VAD_MODE, SYS_STORAGE_U8, GEN_AFE_VAD_AGGRESSIVENESS},
+        {STORAGE_NS_AFE, STORAGE_KEY_NS_ENGINE, SYS_STORAGE_U8, GEN_AFE_NS_ENGINE},
     };
     const esp_err_t err = sys_storage_seed(APP_SEED_VER, seeds, sizeof(seeds) / sizeof(seeds[0]));
     if (err != ESP_OK) {
@@ -108,6 +109,18 @@ static float afe_i8(const char *key, float fallback)
     if (value <= 0) { return (float)value; }
     ESP_LOGW(TAG, "afe/%s %d dB is over full scale, using %.0f", key, value, (double)fallback);
     return fallback;
+}
+
+static uint8_t ns_engine(void)
+{
+    uint8_t engine = 0;
+    if (sys_storage_get_u8(STORAGE_NS_AFE, STORAGE_KEY_NS_ENGINE, &engine) != ESP_OK) {
+        return GEN_AFE_NS_ENGINE;
+    }
+    if (engine <= 1) { return engine; }
+    ESP_LOGW(TAG, "afe/ns_engine %u is neither the floor nor the net, using %d", (unsigned)engine,
+             GEN_AFE_NS_ENGINE);
+    return GEN_AFE_NS_ENGINE;
 }
 
 static uint8_t vad_mode(void)
@@ -377,10 +390,14 @@ esp_err_t app_boot(void)
         .ns_floor_db = afe_i8(STORAGE_KEY_NS_FLOOR_DB, GEN_AFE_NS_FLOOR_DB),
         .agc_target_dbfs = afe_i8(STORAGE_KEY_AGC_TARGET_DBFS, GEN_AFE_AGC_TARGET_DBFS),
         .vad_aggressiveness = vad_mode(),
+        .ns_net = ai_engine_ns_ops(),
+        .ns_engine = ns_engine(),
     };
-    ESP_LOGI(TAG, "afe: ns floor %.0f dB, agc target %.0f dBFS, vad mode %u", (double)front.ns_floor_db,
-             (double)front.agc_target_dbfs, (unsigned)front.vad_aggressiveness);
     ESP_RETURN_ON_ERROR(svc_front_init(&front), TAG, "front end");
+    ESP_LOGI(TAG, "afe: ns %s (afe/ns_engine %u, net %s), floor %.0f dB, agc target %.0f dBFS, vad mode %u",
+             svc_front_ns_engine() == 1 ? "net" : "floor", (unsigned)front.ns_engine,
+             front.ns_net != NULL ? "built" : "absent", (double)front.ns_floor_db,
+             (double)front.agc_target_dbfs, (unsigned)front.vad_aggressiveness);
     log_heap("front");
     start_listener();
     log_heap("listen");

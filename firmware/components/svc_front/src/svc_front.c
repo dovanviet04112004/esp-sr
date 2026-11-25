@@ -1,6 +1,7 @@
 #include "svc_front.h"
 
 #include <math.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <string.h>
 
@@ -20,10 +21,23 @@ static struct {
     uint8_t n_mics;
     uint8_t n_channels;
     bool started;
+    const dsp_afe_ns_ops_t *ns_net; // NULL when the net may not run: none built, or a reference
+    uint8_t ns_running;
 } s_front;
+
+static _Atomic uint8_t s_ns_engine; // asked by dieu_task, taken by sach_task (KEHOACH 5.3)
 
 // dsp_afe's input format by microphone count, then without and with the reference.
 static const char *const kFormats[GEN_ARRAY_N_MICS][2] = {{"M", "MR"}, {"MM", "MMR"}};
+
+// A refused swap drops the request, so the slot's state is not rebuilt on every hop that follows.
+static esp_err_t swap_ns(uint8_t engine)
+{
+    const esp_err_t err = dsp_afe_set_ns(s_front.afe, engine == 1 ? s_front.ns_net : NULL, NULL);
+    if (err == ESP_OK) { s_front.ns_running = engine; }
+    atomic_store(&s_ns_engine, s_front.ns_running);
+    return err;
+}
 
 esp_err_t svc_front_init(const svc_front_config_t *cfg)
 {
@@ -32,9 +46,13 @@ esp_err_t svc_front_init(const svc_front_config_t *cfg)
         cfg->n_channels > cfg->n_mics + 1) {
         return ESP_ERR_INVALID_ARG;
     }
+    // The floor hears the residual echo; the nets did not learn one, so a reference keeps the floor
+    // (KEHOACH 3.9).
+    const dsp_afe_ns_ops_t *net = cfg->n_channels == cfg->n_mics ? cfg->ns_net : NULL;
     const dsp_afe_config_t afe_cfg = {
         .input_format = kFormats[cfg->n_mics - 1][cfg->n_channels - cfg->n_mics],
         .spatial = DSP_AFE_SPATIAL_NONE,
+        .ns = net,
         .calib = cfg->calib,
         .ns_floor_db = cfg->ns_floor_db,
         .agc_target_dbfs = cfg->agc_target_dbfs,
@@ -56,12 +74,31 @@ esp_err_t svc_front_init(const svc_front_config_t *cfg)
         s_front.afe = NULL;
         heap_caps_free(hot);
         heap_caps_free(cold);
+        return err;
     }
+    s_front.ns_net = net;
+    s_front.ns_running = net != NULL ? 1 : 0;
+    const uint8_t engine = net != NULL && cfg->ns_engine == 1 ? 1 : 0;
+    atomic_store(&s_ns_engine, s_front.ns_running);
+    if (engine != s_front.ns_running) { err = swap_ns(engine); }
     const float keep_hops = GEN_AFE_CHAIN_GAP_KEEP_S * GEN_GRID_SAMPLE_RATE_HZ / GEN_GRID_HOP_SAMPLES;
     s_front.keep_hops = (uint32_t)lrintf(keep_hops);
     s_front.n_mics = cfg->n_mics;
     s_front.n_channels = cfg->n_channels;
     return err;
+}
+
+esp_err_t svc_front_request_ns(uint8_t engine)
+{
+    if (engine > 1) { return ESP_ERR_INVALID_ARG; }
+    if (engine == 1 && s_front.ns_net == NULL) { return ESP_ERR_NOT_SUPPORTED; }
+    atomic_store(&s_ns_engine, engine);
+    return ESP_OK;
+}
+
+uint8_t svc_front_ns_engine(void)
+{
+    return s_front.ns_running;
 }
 
 static bool speaker_sounds(const int16_t *interleaved)
@@ -87,6 +124,8 @@ esp_err_t svc_front_step(const int16_t *interleaved, uint32_t seq, dsp_afe_frame
     }
     s_front.started = true;
     s_front.next_seq = seq + 1;
+    const uint8_t engine = atomic_load(&s_ns_engine);
+    if (engine != s_front.ns_running) { swap_ns(engine); }
     // One hop in and straight out again, so the inner fifo never holds more than this one.
     const esp_err_t fed = dsp_afe_feed(s_front.afe, interleaved, 1);
     if (fed != ESP_OK) { return fed; }
