@@ -218,12 +218,13 @@ static float dw_one(const float *w, float b, const float *const r[3], int fo)
     return a;
 }
 
-static void depthwise(const float *cache, int span, int dil, const ai_engine_gtcrn_conv_t *c, float *out)
+static void depthwise(const float *cache, int span, const int slot[3], const ai_engine_gtcrn_conv_t *c,
+                      float *out)
 {
     for (int ch = 0; ch < CH; ch++) {
         const float *w = c->w + ch * 9;
-        const float *const r[3] = {cache + ch * span * F2, cache + (ch * span + dil) * F2,
-                                   cache + (ch * span + 2 * dil) * F2};
+        const float *const r[3] = {cache + (ch * span + slot[0]) * F2, cache + (ch * span + slot[1]) * F2,
+                                   cache + (ch * span + slot[2]) * F2};
         float *o = out + ch * F2;
         o[0] = act_of(dw_one(w, c->b[ch], r, 0), ACT_PRELU, c->slope);
         int fo = 1;
@@ -306,6 +307,7 @@ static inline __attribute__((always_inline)) void gru_step(const ai_engine_gtcrn
         float a1 = g->bih[r + 1];
         float a2 = g->bih[r + 2];
         float a3 = g->bih[r + 3];
+#pragma GCC unroll 16
         for (int i = 0; i < in; i++) {
             const float v = x[i];
             a0 = fmaf(w0[i], v, a0);
@@ -322,6 +324,7 @@ static inline __attribute__((always_inline)) void gru_step(const ai_engine_gtcrn
         float c1 = g->bhh[r + 1];
         float c2 = g->bhh[r + 2];
         float c3 = g->bhh[r + 3];
+#pragma GCC unroll 16
         for (int j = 0; j < hid; j++) {
             const float v = h[j];
             c0 = fmaf(u0[j], v, c0);
@@ -334,6 +337,7 @@ static inline __attribute__((always_inline)) void gru_step(const ai_engine_gtcrn
         gh[r + 2] = c2;
         gh[r + 3] = c3;
     }
+#pragma GCC unroll 8
     for (int j = 0; j < hid; j++) {
         const float rg = sigmoid32(gi[j] + gh[j]);
         const float zg = sigmoid32(gi[hid + j] + gh[hid + j]);
@@ -351,6 +355,7 @@ static void dense(const float *w, const float *b, int in, int out_n, const float
         float a1 = b[o + 1];
         float a2 = b[o + 2];
         float a3 = b[o + 3];
+#pragma GCC unroll 16
         for (int i = 0; i < in; i++) {
             const float v = x[i];
             a0 = fmaf(w0[i], v, a0);
@@ -419,20 +424,21 @@ static float mean_square(const float *v, int n)
     return a / (float)n;
 }
 
+// cache is a ring of span frames per channel, oldest at slot *head: this hop's frame goes in after the
+// newest, and the oldest drops out by moving head, never the frames.
 static void run_block(const ai_engine_gtcrn_block_t *blk, ai_engine_gtcrn_state_t *st, float *cache,
-                      float *tra, const float *x, float *out)
+                      uint8_t *head, float *tra, const float *x, float *out)
 {
     const int frames = 2 * blk->dil;
     const int span = frames + 1;
+    const int slot[3] = {*head, (*head + blk->dil) % span, (*head + frames) % span};
     sfe(x, HALF, F2, st->s);
     pointwise(st->s, 3 * HALF, F2, &blk->pc1, CH, ACT_PRELU, st->h);
     for (int c = 0; c < CH; c++) {
-        memcpy(cache + (c * span + frames) * F2, st->h + c * F2, F2 * sizeof(float));
+        memcpy(cache + (c * span + slot[2]) * F2, st->h + c * F2, F2 * sizeof(float));
     }
-    depthwise(cache, span, blk->dil, &blk->dw, st->d);
-    for (int c = 0; c < CH; c++) {
-        memmove(cache + c * span * F2, cache + (c * span + 1) * F2, (size_t)frames * F2 * sizeof(float));
-    }
+    depthwise(cache, span, slot, &blk->dw, st->d);
+    *head = (uint8_t)((*head + 1) % span);
     float *y = st->t;
     pointwise(st->d, CH, F2, &blk->pc2, HALF, ACT_NONE, y);
     float z[HALF];
@@ -511,6 +517,7 @@ static void add(const float *a, const float *b, float *out, int n)
 void ai_engine_gtcrn_reset(ai_engine_gtcrn_state_t *st)
 {
     memset(st->cache, 0, sizeof(st->cache));
+    memset(st->head, 0, sizeof(st->head));
     memset(st->tra, 0, sizeof(st->tra));
     memset(st->inter, 0, sizeof(st->inter));
 }
@@ -530,8 +537,10 @@ void ai_engine_gtcrn_step(const ai_engine_gtcrn_weights_t *w, ai_engine_gtcrn_st
     conv_k5s2(st->s, ERB, &w->en0, CH, 9, 1, F1, st->pad, st->o0);
     conv_k5s2(st->o0, F1, &w->en1, CH, HALF, 2, F2, st->pad, st->o1);
     const float *in = st->o1;
+    float *cache = st->cache;
     for (int k = 0; k < AI_ENGINE_GTCRN_BLOCKS; k++) {
-        run_block(&w->enc[k], st, st->cache[k], st->tra[k], in, st->skip[k]);
+        run_block(&w->enc[k], st, cache, &st->head[k], st->tra[k], in, st->skip[k]);
+        cache += CH * (2 * w->enc[k].dil + 1) * F2;
         in = st->skip[k];
     }
     memcpy(st->y, in, PLANE * sizeof(float));
@@ -540,8 +549,9 @@ void ai_engine_gtcrn_step(const ai_engine_gtcrn_weights_t *w, ai_engine_gtcrn_st
     }
     for (int k = 0; k < AI_ENGINE_GTCRN_BLOCKS; k++) {
         add(st->y, st->skip[AI_ENGINE_GTCRN_BLOCKS - 1 - k], st->in, PLANE);
-        run_block(&w->dec[k], st, st->cache[AI_ENGINE_GTCRN_BLOCKS + k], st->tra[AI_ENGINE_GTCRN_BLOCKS + k],
-                  st->in, st->y);
+        run_block(&w->dec[k], st, cache, &st->head[AI_ENGINE_GTCRN_BLOCKS + k],
+                  st->tra[AI_ENGINE_GTCRN_BLOCKS + k], st->in, st->y);
+        cache += CH * (2 * w->dec[k].dil + 1) * F2;
     }
     add(st->y, st->o1, st->in, PLANE);
     deconv(st->in, CH, F2, &w->de3, HALF, 2, F1, ACT_PRELU, st->m1);

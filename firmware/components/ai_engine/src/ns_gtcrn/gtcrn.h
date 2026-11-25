@@ -65,12 +65,13 @@ typedef struct {
     ai_engine_gtcrn_conv_t de3, de4;
 } ai_engine_gtcrn_weights_t;
 
-#define AI_ENGINE_GTCRN_SPAN_MAX 11 // a block's cached frames and this hop's, at dilation 5
+#define AI_ENGINE_GTCRN_SPANS (2 * (3 + 5 + 11)) // cached frames and this hop's, dilations 1, 2, 5
 #define AI_ENGINE_GTCRN_PLANE (AI_ENGINE_GTCRN_F2 * AI_ENGINE_GTCRN_CH)
 
 typedef struct {
-    float cache[2 * AI_ENGINE_GTCRN_BLOCKS]
-               [AI_ENGINE_GTCRN_CH * AI_ENGINE_GTCRN_SPAN_MAX * AI_ENGINE_GTCRN_F2];
+    float cache[AI_ENGINE_GTCRN_CH * AI_ENGINE_GTCRN_SPANS *
+                AI_ENGINE_GTCRN_F2];          // every block's, one after another
+    uint8_t head[2 * AI_ENGINE_GTCRN_BLOCKS]; // each block's oldest frame in its ring
     float tra[2 * AI_ENGINE_GTCRN_BLOCKS][2 * AI_ENGINE_GTCRN_HALF];
     float inter[2][AI_ENGINE_GTCRN_PLANE];
     float x[3 * AI_ENGINE_GTCRN_BINS];
