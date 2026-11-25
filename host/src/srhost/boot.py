@@ -19,6 +19,7 @@ SEEDED = re.compile(rb"command thresholds [^\r\n]* seeded: [^\r\n]*")
 SHOWN = (
     LISTENING,
     SEEDED,
+    re.compile(rb"afe: ns [^\r\n]*"),
     re.compile(rb"speaker check [^\r\n]*"),
     re.compile(rb"commands v\d+: [^\r\n]*"),
     re.compile(rb"no models in [^\r\n]*"),

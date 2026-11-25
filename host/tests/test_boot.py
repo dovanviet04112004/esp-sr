@@ -29,3 +29,8 @@ def test_a_boot_that_does_not_listen_fails() -> None:
     log = b"W (900) app_boot: no models in models_0 (ESP_ERR_NOT_FOUND), running without them\r\n"
     assert boot.boot_lines(log) == ["no models in models_0 (ESP_ERR_NOT_FOUND), running without them"]
     assert "not listening" in boot.judged(log)
+
+
+def test_the_ns_slot_the_board_runs_is_shown() -> None:
+    log = b"I (3900) app_boot: afe: ns floor (afe/ns_engine 0, net built), floor -12 dB, agc target -26 dBFS\r\n" + KEPT
+    assert boot.boot_lines(log)[0].startswith("afe: ns floor (afe/ns_engine 0, net built)")
