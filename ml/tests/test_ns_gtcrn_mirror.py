@@ -36,8 +36,10 @@ def test_fma32_rounds_the_exact_sum_once() -> None:
 
 
 def test_exp_reciprocal_and_square_root_are_float32_close() -> None:
-    for x in np.linspace(-80.0, 80.0, 4001, dtype=np.float32):
-        assert abs(float(gtcrn_mirror.exp32(x)) / math.exp(float(x)) - 1.0) < 4e-7
+    for a in np.linspace(0.0, 87.0, 4001, dtype=np.float32):
+        assert abs(float(gtcrn_mirror.exp_neg32(a)) / math.exp(-float(a)) - 1.0) < 2.5e-7
+    for d in np.linspace(1.0, 2.0, 4001, dtype=np.float32):
+        assert abs(float(gtcrn_mirror.recip12(d)) * float(d) - 1.0) < 1.2e-7
     for v in np.geomspace(1e-30, 1e30, 3001).astype(np.float32):
         assert abs(float(gtcrn_mirror.sqrt32(v)) / math.sqrt(float(v)) - 1.0) < 3e-7
         assert abs(float(gtcrn_mirror.rsqrt32(v)) * math.sqrt(float(v)) - 1.0) < 3e-7
@@ -89,6 +91,24 @@ def test_deconv_is_a_conv_transpose2d(cin: int, cout: int, groups: int, fin: int
         groups=groups,
     )[0, :, 0].numpy()
     np.testing.assert_allclose(out, ref, rtol=1e-5, atol=1e-5)
+
+
+def test_sigmoid_and_tanh_are_within_an_ulp() -> None:
+    for v in np.linspace(-90.0, 90.0, 18001, dtype=np.float32):
+        want = 1.0 / (1.0 + math.exp(-float(v)))
+        got = float(gtcrn_mirror.sigmoid32(v))
+        assert abs(got - want) < 1.2e-7 and (v > -80.0 or abs(got - want) < 1e-30), v
+        if v < 0.0 and v > -80.0:
+            assert abs(got / want - 1.0) < 4e-7, v
+        assert abs(float(gtcrn_mirror.tanh32(v)) - math.tanh(float(v))) < 1.5e-7, v
+    assert gtcrn_mirror.tanh32(np.float32(-0.5)) == -gtcrn_mirror.tanh32(np.float32(0.5))
+
+
+def test_negative_control_a_one_step_seed_is_caught() -> None:
+    d = np.float32(1.37)
+    y = gtcrn_mirror.fma32(gtcrn_mirror.fma32(gtcrn_mirror.SEED[2], d, gtcrn_mirror.SEED[1]), d, gtcrn_mirror.SEED[0])
+    y = gtcrn_mirror.fma32(y, gtcrn_mirror.fma32(-d, y, np.float32(1.0)), y)
+    assert abs(float(y) * float(d) - 1.0) > 1.2e-7
 
 
 def test_gru_step_and_layer_norm_follow_pytorch() -> None:

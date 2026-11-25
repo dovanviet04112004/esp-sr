@@ -21,9 +21,17 @@ CH, HALF, HIDDEN = 16, 8, 16
 DILATIONS = (1, 2, 5)
 MAG_EPS = np.float32(1e-12)
 LN_EPS = np.float32(1e-8)
-EXP_LIMIT = np.float32(80.0)  # e^±80 stays normal: no subnormal on any chip
+ACT_LIMIT = np.float32(87.0)  # e^-87 stays normal: no subnormal on any chip
 LOG2E, LN2_HI, LN2_LO = np.float32(1.442695041), np.float32(0.693145752), np.float32(1.42860677e-06)
-EXP_POLY = tuple(np.float32(1.0 / math.factorial(k)) for k in range(6, -1, -1))
+ROUND_SHIFT = np.float32(1.5 * 2.0**23)  # t + this - this is t rounded to an integer, ties to even
+# e^s on |s| <= ln2 / 2, minimax degree 5, highest power first: 7.5e-8 relative.
+EXP_POLY = tuple(
+    np.float32(float.fromhex(c))
+    for c in ("0x1.0fe5bep-7", "0x1.575eeep-5", "0x1.555a18p-3", "0x1.fffd1ap-2", "0x1.fffff6p-1", "0x1.000002p+0")
+)
+# 1/d ~ q0 + q1 d + q2 d^2 on (1, 2], 1.0e-2 relative: two Newton steps reach float32.
+SEED = tuple(np.float32(float.fromhex(c)) for c in ("0x1.0f836ap+1", "-0x1.745c28p+0", "0x1.4afc94p-2"))
+SEED_NEWTON_STEPS = 2
 NEWTON_STEPS = 3  # from a linear first guess: float32 converged
 RECIP_C0, RECIP_C1 = np.float32(48.0 / 17.0), np.float32(32.0 / 17.0)  # 1/m ~ c0 - c1 m on [0.5, 1)
 RSQRT_LOW = (np.float32(1.8284271), np.float32(0.8284271))  # 1/sqrt(m) ~ c0 - c1 m on [0.5, 1)
@@ -50,15 +58,25 @@ def fma32(a, b, c):
     return np.float32(t)
 
 
-@numba.njit(cache=True)
-def exp32(x):
-    x = min(max(np.float32(x), -EXP_LIMIT), EXP_LIMIT)
-    n = np.float32(math.floor(x * LOG2E + np.float32(0.5)))
-    r = fma32(-n, LN2_LO, fma32(-n, LN2_HI, x))
+@numba.njit(cache=True, inline="always")
+def exp_neg32(a):
+    """e^-a for 0 <= a <= ACT_LIMIT: n, a / ln2 rounded by ROUND_SHIFT; e^(n ln2 - a) by EXP_POLY; times 2^-n."""
+    k = np.float32(np.float32(a * LOG2E) + ROUND_SHIFT)
+    n = np.float32(k - ROUND_SHIFT)
+    s = -fma32(-n, LN2_LO, fma32(-n, LN2_HI, a))
     p = EXP_POLY[0]
-    for k in range(1, len(EXP_POLY)):
-        p = fma32(p, r, EXP_POLY[k])
-    return np.float32(p * np.float32(2.0 ** int(n)))
+    for j in range(1, len(EXP_POLY)):
+        p = fma32(p, s, EXP_POLY[j])
+    return np.float32(p * np.float32(2.0 ** -int(n)))
+
+
+@numba.njit(cache=True, inline="always")
+def recip12(d):
+    """1 / d for d in (1, 2]: SEED, then SEED_NEWTON_STEPS fused Newton steps."""
+    y = fma32(fma32(SEED[2], d, SEED[1]), d, SEED[0])
+    for _ in range(SEED_NEWTON_STEPS):
+        y = fma32(y, fma32(-d, y, np.float32(1.0)), y)
+    return y
 
 
 @numba.njit(cache=True)
@@ -101,12 +119,18 @@ def sqrt32(v):
 
 @numba.njit(cache=True, inline="always")
 def sigmoid32(v):
-    return recip32(np.float32(1.0) + exp32(-v))
+    """1 / (1 + u) for v >= 0, else u / (1 + u), with u = e^-|v|: the denominator stays in (1, 2]."""
+    u = exp_neg32(min(np.float32(abs(v)), ACT_LIMIT))
+    y = recip12(np.float32(1.0) + u)
+    return y if v >= 0 else np.float32(u * y)
 
 
 @numba.njit(cache=True, inline="always")
 def tanh32(v):
-    return np.float32(1.0) - np.float32(2.0) * recip32(exp32(np.float32(2.0) * v) + np.float32(1.0))
+    """(1 - u) / (1 + u) with u = e^-2|v|, signed as v."""
+    u = exp_neg32(min(np.float32(abs(v) * np.float32(2.0)), ACT_LIMIT))
+    t = np.float32((np.float32(1.0) - u) * recip12(np.float32(1.0) + u))
+    return -t if v < 0 else t
 
 
 @numba.njit(cache=True)
