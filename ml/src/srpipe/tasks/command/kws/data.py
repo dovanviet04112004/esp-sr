@@ -316,6 +316,7 @@ def built_as(out: Path, device_cfg: dict, split_file: Path, repeats: int, pads_s
     body = yaml.safe_load((out / "manifest.yaml").read_text(encoding="utf-8"))
     return (
         body["config"] == device_cfg
+        and body.get("ns") == device.heard_ns().get("ns")
         and body["split"]["sha256"] == splits.sha256_of(split_file)
         and body.get("repeats", 1) == repeats
         and body.get("pads_s") == list(pads_s)

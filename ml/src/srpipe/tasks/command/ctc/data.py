@@ -202,7 +202,8 @@ def built_as(out: Path, device_cfg: dict, split_file: Path, options: dict) -> bo
         and all(body.get(k) == v for k, v in device.cut_marks(options["cut"]).items())
     )
     same_chip = body.get("chip") == device.heard_chip(device_cfg, pitch=True).get("chip")
-    return body["config"] == device_cfg and same_split and same_options and same_chip
+    same_ns = body.get("ns") == device.heard_ns().get("ns")
+    return body["config"] == device_cfg and same_split and same_options and same_chip and same_ns
 
 
 def split_board_sessions(folder: Path) -> list[str]:
@@ -245,8 +246,9 @@ def board_built_as(out: Path, device_cfg: dict, rows: list[dict], board: dict) -
     same_sessions = body["sessions"] == [r["session"] for r in rows]
     same_rule = body.get("listen_hash") == f"0x{listen.HASH:08x}" and body.get("chain") == BOARD_CHAIN
     same_chip = body.get("chip") == device.heard_chip(device_cfg, pitch=True).get("chip")
+    same_ns = body.get("ns") == device.heard_ns().get("ns")
     same_cut = body["config"] == device_cfg and same_sessions and body["board"] == board_cut(board)
-    return same_cut and same_rule and same_chip
+    return same_cut and same_rule and same_chip and same_ns
 
 
 def cut_board(cfg: dict, paths: dict, out: Path) -> str:
@@ -302,6 +304,7 @@ def cut_board(cfg: dict, paths: dict, out: Path) -> str:
     head = {
         "pitch": True,
         **device.heard_chip(device_cfg, pitch=True),
+        **device.heard_ns(),
         "config": device_cfg,
         "sessions": [r["session"] for r in rows],
         "board": board_cut(board),

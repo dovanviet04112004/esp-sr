@@ -596,6 +596,7 @@ def build_noise(
         "clips_sha256": hashlib.sha256(listed.encode("utf-8")).hexdigest(),
         "dtype": dtype,
         "rooms_sha256": sha256_of(bank / "rooms.yaml"),
+        **heard_ns(),
     }
     begun, manifest = out / "build.yaml", out / "manifest.yaml"
     if begun.exists() and yaml.safe_load(begun.read_text(encoding="utf-8")) != head:
@@ -768,6 +769,13 @@ def _shard(job: tuple) -> list[Path]:
     return shard_files(out, shard, pitch is not None, keep_pcm)
 
 
+def heard_ns() -> dict:
+    """build.yaml's ns: the engine SRPIPE_NS put in the chain's ns slot, so that no build of one engine goes on from,
+    or stands in for, another's or the floor's (KEHOACH 3.9)."""
+    name = ns_engine()
+    return {"ns": name} if name else {}
+
+
 def heard_chip(cfg: dict, pitch: bool) -> dict:
     """build.yaml's chip: one other than chip.yaml's default when the pitch dims come from its int8 row, so that no
     build of one chip goes on from another's (KEHOACH 3.14)."""
@@ -825,6 +833,7 @@ def build(
         **({"pads_s": list(pads)} if pads_s else {}),
         **({"pitch": True} if pitch else {}),
         **heard_chip(cfg, pitch),
+        **heard_ns(),
         **({} if keep_pcm else {"pcm": False}),
         **({"speeds": list(speeds)} if speeds else {}),
         **({"dtype": dtype} if dtype != "float32" else {}),

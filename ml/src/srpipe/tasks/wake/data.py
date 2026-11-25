@@ -447,7 +447,8 @@ def built_as(out: Path, device_cfg: dict, split_file: Path, repeats: int, dtype:
     body = yaml.safe_load((out / "manifest.yaml").read_text(encoding="utf-8"))
     same_split = body["split"]["sha256"] == splits.sha256_of(split_file)
     same_dtype = body.get("dtype", "float32") == dtype
-    return body["config"] == device_cfg and same_split and body.get("repeats", 1) == repeats and same_dtype
+    same_ns = body.get("ns") == device.heard_ns().get("ns")
+    return body["config"] == device_cfg and same_split and body.get("repeats", 1) == repeats and same_dtype and same_ns
 
 
 def _clip_f0(job: tuple[Path, str, float, list[float]]) -> float | None:
@@ -557,7 +558,8 @@ def board_built_as(out: Path, device_cfg: dict, rows: list[dict], board: dict, d
         return False
     body = yaml.safe_load((out / "manifest.yaml").read_text(encoding="utf-8"))
     same_cut = all(body.get(k) == v for k, v in board_cut(rows, board).items())
-    return body["config"] == device_cfg and same_cut and body["dtype"] == dtype
+    same_ns = body.get("ns") == device.heard_ns().get("ns")
+    return body["config"] == device_cfg and same_cut and body["dtype"] == dtype and same_ns
 
 
 def cut_board(cfg: dict, paths: dict[str, Path], out: Path, rows: list[dict], positive: bool) -> str:
@@ -582,7 +584,7 @@ def cut_board(cfg: dict, paths: dict[str, Path], out: Path, rows: list[dict], po
     lines = "".join(json.dumps(i, ensure_ascii=False) + "\n" for i in items)
     (out / f"{BOARD_SHARD}.items.jsonl").write_text(lines, encoding="utf-8")
     names = [f"{BOARD_SHARD}.features.npy", f"{BOARD_SHARD}.items.jsonl"]
-    head = {"config": device_cfg} | board_cut(rows, board) | {"dtype": dtype}
+    head = {"config": device_cfg} | board_cut(rows, board) | {"dtype": dtype} | device.heard_ns()
     head["sha256"] = {n: splits.sha256_of(out / n) for n in names}
     (out / "manifest.yaml").write_text(yaml.safe_dump(head, allow_unicode=True, sort_keys=False), encoding="utf-8")
     masked = sum(bool(i.get("ignore")) for i in items)
