@@ -1,0 +1,22 @@
+{
+  "branch": "ns",
+  "run": "20261125_2c747b5-dirty_435e6b",
+  "grid_hash": "0x9c914b61",
+  "files": [
+    {
+      "file": "ns_ulunas.bin",
+      "entry": "ns_ulunas",
+      "kind": "weights",
+      "sha256": "00c58616b54e577521b5f37a25021f65361ff31d1a7db6a3e9317a2cfa3ad634"
+    }
+  ],
+  "learnt_from": {
+    "pretrained": "ulunas",
+    "weights": {
+      "file": "checkpoints/model_trained_on_dns3.tar",
+      "sha256": "9a0656bf8e88d36865792d3065fed9bc33d5ab85e11ae3a1ae085b928fdb49a8",
+      "url": "https://raw.githubusercontent.com/Xiaobin-Rong/ul-unas/00f7c700da43d38347f30a6ccebd86fcbc798e07/checkpoints/model_trained_on_dns3.tar"
+    }
+  },
+  "backend": "ulunas"
+}
