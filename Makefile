@@ -449,7 +449,7 @@ command-eval: ## Score Gate 3 of a track on the board sessions: TRACK=kws|ctc|rn
 
 ##@ Noise suppression: ns candidates (E9-T3, E9-T4)
 
-.PHONY: ns-data ns-pilot ns-smoke ns-train ns-pause ns-resume ns-eval ns-bench
+.PHONY: ns-data ns-pilot ns-smoke ns-train ns-pause ns-resume ns-eval ns-bench ns-gtcrn-deploy
 ns-data: screen ## Split, pools and held val/test sets of the ns branch into data/splits/ns, interim and processed
 	$(ML) python -m srpipe.tasks.ns.data clean && uv run python -m srpipe.tasks.ns.data split \
 	  && uv run python -m srpipe.tasks.ns.data pool && uv run python -m srpipe.tasks.ns.data sets
@@ -481,6 +481,9 @@ ns-eval: ## Score the last ns run against the OM-LSA floor on the held val and t
 
 ns-bench: ## Score OM-LSA and an ns run's candidates on the afe bench's fan and music mixtures [RUN=<run>] [EPOCH=<e>]
 	$(ML) --extra train python -m srpipe.tasks.ns.eval bench $(if $(RUN),--run $(RUN)) $(if $(EPOCH),--epoch $(EPOCH))
+
+ns-gtcrn-deploy: ## GTCRN's pinned DNS3 weights, held to StreamGTCRN by the mirror, into firmware/models/ns and models.lock.json (E9-T16)
+	$(ML_CPU) --extra train python -m srpipe.tasks.ns.gtcrn deploy
 
 ##@ Measurements
 

@@ -162,3 +162,8 @@ gtcrn:                             # SRPIPE_NS=gtcrn: GTCRN (Xiaobin-Rong/gtcrn,
       url: https://raw.githubusercontent.com/Xiaobin-Rong/gtcrn/502ebfab64da7c4a9af78dcb9c6ceef1ebb01c73/checkpoints/model_trained_on_dns3.tar
       sha256: a630d992cf792daf4ce2bb5bcf9c4d389f740a8f09c6e0971184697fe6371b79
   caches: {conv: [2, 1, 16, 16, 33], tra: [2, 3, 1, 1, 16], inter: [2, 1, 33, 16]}   # its streaming state, zero at start
+  deploy:                          # make ns-gtcrn-deploy: the mirror on the checkpoint's weights against StreamGTCRN
+    seed: 20261125
+    hops: 300
+    level_db: [-60.0, 20.0]        # each hop's bins at one level drawn here, as silence and loud speech span
+    gain_atol: 1.0e-4              # largest gap of a gain the deploy accepts
