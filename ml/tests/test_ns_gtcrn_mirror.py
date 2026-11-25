@@ -8,7 +8,6 @@ from fractions import Fraction
 
 import numpy as np
 import pytest
-import torch
 
 from srpipe.core.config import data_paths
 from srpipe.tasks.ns import gtcrn_mirror
@@ -46,6 +45,7 @@ def test_exp_and_sqrt_are_float32_close() -> None:
 
 @pytest.mark.parametrize(("stride", "pad", "dil", "groups"), [(2, 2, 1, 1), (2, 2, 1, 2), (1, 1, 2, 16), (1, 0, 1, 1)])
 def test_conv_is_a_conv2d_over_the_last_time_step(stride: int, pad: int, dil: int, groups: int) -> None:
+    torch = pytest.importorskip("torch")
     rng = np.random.default_rng(1)
     cin, cout, kt, kf, fin = 16, 16, 3 if dil > 1 else 1, 5 if stride == 2 else (3 if groups == 16 else 1), 33
     span = (kt - 1) * dil + 1
@@ -70,6 +70,7 @@ def test_conv_is_a_conv2d_over_the_last_time_step(stride: int, pad: int, dil: in
 
 @pytest.mark.parametrize(("cin", "cout", "groups", "fin"), [(16, 16, 2, 33), (16, 2, 1, 65)])
 def test_deconv_is_a_conv_transpose2d(cin: int, cout: int, groups: int, fin: int) -> None:
+    torch = pytest.importorskip("torch")
     rng = np.random.default_rng(2)
     x = rng.standard_normal((cin, fin)).astype(np.float32)
     w = rng.standard_normal((cin, cout // groups, 1, 5)).astype(np.float32)
@@ -89,6 +90,7 @@ def test_deconv_is_a_conv_transpose2d(cin: int, cout: int, groups: int, fin: int
 
 
 def test_gru_step_and_layer_norm_follow_pytorch() -> None:
+    torch = pytest.importorskip("torch")
     torch.manual_seed(3)
     cell = torch.nn.GRUCell(8, 16).double()
     x, h = torch.randn(8, dtype=torch.float64), torch.randn(16, dtype=torch.float64)
@@ -104,6 +106,7 @@ def test_gru_step_and_layer_norm_follow_pytorch() -> None:
 
 
 def test_a_hop_matches_stream_gtcrn_on_random_weights() -> None:
+    torch = pytest.importorskip("torch")
     folder = data_paths()["cache"] / "afe_ref" / "gtcrn" / "stream"
     if not (folder / "gtcrn_stream.py").exists():
         pytest.skip("GTCRN's pinned stream files are not cached: run a SRPIPE_NS=gtcrn command once")
