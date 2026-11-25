@@ -28,7 +28,7 @@ from scipy import signal
 
 from srpipe.core import screen, splits
 from srpipe.core.audio_io import ItemReader, ramped, read_wav, to_float, write_wav
-from srpipe.core.config import CONFIGS, ML_ROOT, chip, chip_is_default, data_paths, load_device, ns_engine
+from srpipe.core.config import CONFIGS, ML_ROOT, NS_ENV, chip, chip_is_default, data_paths, load_device, ns_engine
 from srpipe.dsp.afe import hpf
 from srpipe.dsp.afe.chain import PCM_FULL_SCALE, PCM_MAX, PCM_MIN, Chain, ChainConfig
 from srpipe.dsp.afe.vad import Vad
@@ -222,9 +222,12 @@ def with_ns_engine(chain_cfg: ChainConfig) -> ChainConfig:
     if name is None or chain_cfg.ns_slot is not None:
         return chain_cfg
     # Imported here: tasks.ns builds on the board simulation that imports this module.
-    from srpipe.tasks.ns import gtcrn
+    from srpipe.tasks.ns import gtcrn, ulunas
 
-    return replace(chain_cfg, ns_slot=gtcrn.slot_factory(name))
+    makers = {"gtcrn": gtcrn.slot_factory, "ulunas": ulunas.slot_factory}
+    if name not in makers:
+        raise SystemExit(f"{NS_ENV}={name}: the Python chain's ns slot knows {sorted(makers)}")
+    return replace(chain_cfg, ns_slot=makers[name]())
 
 
 def listen(

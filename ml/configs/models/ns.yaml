@@ -167,3 +167,20 @@ gtcrn:                             # SRPIPE_NS=gtcrn: GTCRN (Xiaobin-Rong/gtcrn,
     hops: 300
     level_db: [-60.0, 20.0]        # each hop's bins at one level drawn here, as silence and loud speech span
     gain_atol: 1.0e-4              # largest gap of a gain the deploy accepts
+ulunas:                            # SRPIPE_NS=ulunas: UL-UNAS (Xiaobin-Rong/ul-unas, MIT) in the ns slot (ADR-0048)
+  checkpoint: checkpoints/model_trained_on_dns3.tar   # the official DNS3 weights
+  files:                           # the model and its streaming wrapper at the pinned commit, under cache/afe_ref/ulunas/
+    ulunas.py:
+      url: https://raw.githubusercontent.com/Xiaobin-Rong/ul-unas/00f7c700da43d38347f30a6ccebd86fcbc798e07/ulunas.py
+      sha256: e53f7550d9698cb0aee0fc517b3f4caeb679d9e3f4c00fa47a0f3a975c228adf
+    ulunas_onnx/stream/ulunas_stream.py:
+      url: https://raw.githubusercontent.com/Xiaobin-Rong/ul-unas/00f7c700da43d38347f30a6ccebd86fcbc798e07/ulunas_onnx/stream/ulunas_stream.py
+      sha256: 897f1067fc263e1f3b489ec2bd633bc3e1bcb65c6a2eb3fe371ad95a5c2c69ad
+    checkpoints/model_trained_on_dns3.tar:
+      url: https://raw.githubusercontent.com/Xiaobin-Rong/ul-unas/00f7c700da43d38347f30a6ccebd86fcbc798e07/checkpoints/model_trained_on_dns3.tar
+      sha256: 9a0656bf8e88d36865792d3065fed9bc33d5ab85e11ae3a1ae085b928fdb49a8
+  deploy:                          # make ns-ulunas-deploy: the mirror on the checkpoint's weights against StreamULUNAS
+    seed: 20261125
+    hops: 300
+    level_db: [-60.0, 20.0]        # each hop's bins at one level drawn here, as silence and loud speech span
+    gain_atol: 1.0e-4              # largest gap of a gain the deploy accepts
