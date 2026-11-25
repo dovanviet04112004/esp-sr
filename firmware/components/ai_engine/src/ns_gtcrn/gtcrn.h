@@ -89,6 +89,7 @@ typedef struct {
     float m1[AI_ENGINE_GTCRN_CH * AI_ENGINE_GTCRN_F1];
     float m2[2 * AI_ENGINE_GTCRN_ERB];
     float mask[2 * AI_ENGINE_GTCRN_BINS];
+    float pad[9 * (AI_ENGINE_GTCRN_ERB + 5)]; // en0's and en1's input rows between zeros
 } ai_engine_gtcrn_state_t;
 
 /** Point w into a blob the mirror's pack wrote, checking its magic, version and length.
