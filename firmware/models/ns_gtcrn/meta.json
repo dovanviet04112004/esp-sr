@@ -1,0 +1,22 @@
+{
+  "branch": "ns_gtcrn",
+  "run": "20261126_86a28f7_b5cec2",
+  "grid_hash": "0x9c914b61",
+  "files": [
+    {
+      "file": "ns_gtcrn.bin",
+      "entry": "ns_gtcrn",
+      "kind": "weights",
+      "sha256": "53e175f06ae832d328564c1a34ce7c5d7624b8b5447e450d7e41c8f6417927a9"
+    }
+  ],
+  "learnt_from": {
+    "pretrained": "gtcrn",
+    "weights": {
+      "file": "checkpoints/model_trained_on_dns3.tar",
+      "sha256": "a630d992cf792daf4ce2bb5bcf9c4d389f740a8f09c6e0971184697fe6371b79",
+      "url": "https://raw.githubusercontent.com/Xiaobin-Rong/gtcrn/502ebfab64da7c4a9af78dcb9c6ceef1ebb01c73/checkpoints/model_trained_on_dns3.tar"
+    }
+  },
+  "backend": "gtcrn"
+}
