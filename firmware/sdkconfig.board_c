@@ -7,6 +7,8 @@ CONFIG_APP_SPEAKER_ENABLE=y
 CONFIG_APP_SENSORS_ENABLE=y
 # The speaker's sound comes back on the microphone; aec takes it off, its state in PSRAM (KEHOACH 3.5).
 CONFIG_DSP_AFE_AEC_ENABLE=y
+# The speaker reference keeps the ns slot on the floor, and a net's PSRAM would starve the console (KEHOACH 3.9).
+CONFIG_AI_ENGINE_NS_BACKEND_NONE=y
 # nhin_task holds core 0 for seconds a picture and sits on a PSRAM stack (KEHOACH 3.18, 5.2).
 CONFIG_ESP_TASK_WDT_TIMEOUT_S=15
 CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y

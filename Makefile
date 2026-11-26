@@ -54,9 +54,10 @@ BENCH_BUILD := build_bench$(if $(filter 1,$(MICS)),_mic1)$(if $(filter C,$(BOARD
 BENCH_LAYER := $(if $(filter C,$(BOARD)),sdkconfig.board_c,$(if $(filter 1,$(MICS)),sdkconfig.mic1))
 NS_LAYER := $(if $(NS),$(BENCH_BUILD)/sdkconfig.ns)
 NS_LINE := $(if $(NS),CONFIG_AI_ENGINE_NS_BACKEND_$(shell echo $(NS) | tr a-z A-Z)=y)
-# The ns net the build carries, NS= or else the chip defaults' choice: its lock row goes in the image (KEHOACH 6.3).
-CARRIED_NS := $(or $(NS),$(shell sed -n 's/^CONFIG_AI_ENGINE_NS_BACKEND_\([A-Z]*\)=y$$/\1/p' \
-  firmware/sdkconfig.defaults.esp32s3 | tr A-Z a-z))
+# The ns net the build carries, NS= or else the last choice of the chip defaults and the board's layer: its lock row
+# goes in the image, none for none (KEHOACH 4.5.8, 6.3).
+CARRIED_NS := $(or $(NS),$(filter-out none,$(shell cat firmware/sdkconfig.defaults.esp32s3 \
+  $(addprefix firmware/,$(BENCH_LAYER)) | sed -n 's/^CONFIG_AI_ENGINE_NS_BACKEND_\([A-Z]*\)=y$$/\1/p' | tail -1 | tr A-Z a-z)))
 IDF_BENCH = idf.py -B $(BENCH_BUILD) -D SDKCONFIG=$(BENCH_BUILD)/sdkconfig \
   -D SDKCONFIG_DEFAULTS="$(SDKCONFIG_BASE);sdkconfig.bench$(SECRETS)$(if $(BENCH_LAYER),;$(BENCH_LAYER))$(if $(NS),;$(NS_LAYER))"
 FW_DEFAULTS := firmware/sdkconfig.defaults firmware/sdkconfig.defaults.esp32s3 firmware/sdkconfig.afe \
