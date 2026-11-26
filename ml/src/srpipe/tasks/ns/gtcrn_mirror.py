@@ -6,7 +6,11 @@ checkpoint's, batch norms folded into the convolutions in float64, the ERB filte
 from __future__ import annotations
 
 import argparse
+import functools
+import hashlib
+import json
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -38,6 +42,7 @@ RSQRT_LOW = (np.float32(1.8284271), np.float32(0.8284271))  # 1/sqrt(m) ~ c0 - c
 RSQRT_HIGH = (np.float32(1.2928932), np.float32(0.2928932))  # and on [1, 2)
 TINY_SQUARE = np.float32(2.0**-100)  # a square under this has a root of 0 for the gains
 BLOB_MAGIC, BLOB_VERSION = 0x31435447, 1  # "GTC1", as ns_gtcrn/gtcrn.c reads it
+LOCK_ROW = "ns_gtcrn"  # its lock row: the blob the chip runs (ADR-0049)
 GOLDEN_ROOT = ML_ROOT.parent / "contracts" / "golden"
 BLOCK = "ns_gtcrn"
 GOLDEN_SEED, GOLDEN_HOPS = 20261125, 40
@@ -536,6 +541,78 @@ def pack(w: Weights) -> bytes:
     head = np.array([BLOB_MAGIC, BLOB_VERSION, w.erb[1].size, w.ierb[1].size], np.uint32).tobytes()
     body = (np.asarray(a, np.int32 if np.asarray(a).dtype.kind == "i" else np.float32).tobytes() for a in arrays)
     return head + b"".join(body)
+
+
+def unpack(blob: bytes) -> Weights:
+    """The Weights pack wrote into blob, each array read back in the order of gtcrn.c's take_*."""
+    head = np.frombuffer(blob, np.uint32, 4)
+    if head[0] != BLOB_MAGIC or head[1] != BLOB_VERSION:
+        raise ValueError(f"not a version {BLOB_VERSION} GTCRN blob")
+    at = [16]
+
+    def take(shape, dtype=np.float32) -> np.ndarray:
+        n = int(np.prod(shape))
+        a = np.frombuffer(blob, dtype, n, at[0]).reshape(shape).copy()
+        at[0] += 4 * n
+        return a
+
+    def conv(shape, outs) -> tuple:
+        return take(shape), take(outs), np.float32(take(1)[0])
+
+    def gru(inp, hid) -> tuple:
+        return take((3 * hid, inp)), take((3 * hid, hid)), take(3 * hid), take(3 * hid)
+
+    def block(dil) -> Block:
+        pc1 = (take((CH, 3 * HALF, 1, 1)), take(CH), np.float32(take(1)[0]))
+        dw = (take((CH, 1, 3, 3)), take(CH), np.float32(take(1)[0]))
+        pc2 = (take((HALF, CH, 1, 1)), take(HALF))
+        return Block(*pc1, *dw, *pc2, gru(HALF, 2 * HALF), take((HALF, 2 * HALF)), take(HALF), dil)
+
+    def dual() -> DualPath:
+        intra = tuple(tuple(gru(HALF, HALF // 2) for _ in range(2)) for _ in range(2))
+        intra_fc, intra_ln = (take((CH, CH)), take(CH)), (take(F2 * CH), take(F2 * CH))
+        inter = tuple(gru(HALF, HALF) for _ in range(2))
+        return DualPath(intra, intra_fc, intra_ln, inter, (take((CH, CH)), take(CH)), (take(F2 * CH), take(F2 * CH)))
+
+    erb = (take(ERB_BINS - LOW + 1, np.int32), take(int(head[2]), np.int32), take(int(head[2])))
+    ierb = (take(BINS - LOW + 1, np.int32), take(int(head[3]), np.int32), take(int(head[3])))
+    en0, en1 = conv((CH, 9, 1, 5), CH), conv((CH, HALF, 1, 5), CH)
+    enc = [block(d) for d in DILATIONS]
+    dps = [dual(), dual()]
+    dec = [block(d) for d in DILATIONS[::-1]]
+    w = Weights(erb, ierb, en0, en1, enc, dps, dec, conv((CH, HALF, 1, 5), CH), conv((CH, 2, 1, 5), 2))
+    if at[0] != len(blob):
+        raise ValueError(f"a GTCRN blob of {len(blob)} bytes whose arrays end at byte {at[0]}")
+    return w
+
+
+class MirrorSlot:
+    """One chain's GTCRN as the chip runs it: step on the shared weights, this chain's state zero at start; the aec's
+    echo is not heard."""
+
+    def __init__(self, w: Weights) -> None:
+        self.w, self.st = w, State()
+
+    def gains(self, bins: np.ndarray, echo_power: np.ndarray | None) -> np.ndarray:
+        return step(self.w, self.st, np.ascontiguousarray(bins, np.complex64))
+
+
+@functools.cache
+def slot_factory() -> Callable[[], MirrorSlot]:
+    """The maker of GTCRN's ns slots, one per process: the ns_gtcrn blob models.lock.json holds, its sha256 checked,
+    unpacked once and shared by every chain (KEHOACH 3.9)."""
+    from srpipe.export import update_lock
+
+    row = json.loads(update_lock.LOCK.read_text(encoding="utf-8"))["models"][LOCK_ROW]
+    held = row["files"][0]
+    path = update_lock.MODELS / LOCK_ROW / held["file"]
+    if not path.exists():
+        raise SystemExit(f"{path}: absent, make ns-gtcrn-deploy writes it")
+    blob = path.read_bytes()
+    if hashlib.sha256(blob).hexdigest() != held["sha256"]:
+        raise SystemExit(f"{path} differs from the sha256 {update_lock.LOCK.name} holds: make ns-gtcrn-deploy")
+    w = unpack(blob)
+    return lambda: MirrorSlot(w)
 
 
 def random_weights(rng: np.random.Generator) -> Weights:

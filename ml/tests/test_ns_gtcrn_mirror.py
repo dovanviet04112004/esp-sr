@@ -111,6 +111,26 @@ def test_negative_control_a_one_step_seed_is_caught() -> None:
     assert abs(float(y) * float(d) - 1.0) > 1.2e-7
 
 
+def test_unpack_reads_back_every_array_pack_wrote() -> None:
+    w = gtcrn_mirror.random_weights(np.random.default_rng(7))
+    blob = gtcrn_mirror.pack(w)
+    back = gtcrn_mirror.unpack(blob)
+    assert gtcrn_mirror.pack(back) == blob
+    rng = np.random.default_rng(8)
+    st, st_back = gtcrn_mirror.State(), gtcrn_mirror.State()
+    for _ in range(4):
+        bins = (rng.standard_normal(257) + 1j * rng.standard_normal(257)).astype(np.complex64)
+        np.testing.assert_array_equal(gtcrn_mirror.step(back, st_back, bins), gtcrn_mirror.step(w, st, bins))
+
+
+def test_negative_control_a_foreign_or_cut_blob_is_refused() -> None:
+    blob = gtcrn_mirror.pack(gtcrn_mirror.random_weights(np.random.default_rng(7)))
+    with pytest.raises(ValueError, match="not a version"):
+        gtcrn_mirror.unpack(b"\0\0\0\0" + blob[4:])
+    with pytest.raises(ValueError, match="arrays end"):
+        gtcrn_mirror.unpack(blob + b"\0\0\0\0")
+
+
 def test_gru_step_and_layer_norm_follow_pytorch() -> None:
     torch = pytest.importorskip("torch")
     torch.manual_seed(3)
