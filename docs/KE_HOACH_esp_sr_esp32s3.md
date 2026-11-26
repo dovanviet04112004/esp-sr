@@ -976,7 +976,10 @@ của checkpoint ghim là một mục của ảnh model, và `tasks/ns/gtcrn_mir
 theo đúng thứ tự cộng của C. Gain của khe là độ lớn của mặt nạ phức, chặn ở 1. Mặc định là sàn; NVS `afe/ns_engine` đổi
 giữa sàn và GTCRN lúc chạy (bảng trên). Sau hai vòng tối ưu, sigmoid và tanh bốn làn rồi dạng ngắn hơn ở cả bản soi
 gương (`ns.md` §10.8, §10.9), GTCRN tốn 11,4 ms một bước với trạng thái ở PSRAM và chạy kịp trong chuỗi thật của board B
-(§10.10), nên bản dựng S3 mang GTCRN (`sdkconfig.defaults.esp32s3`, ADR-0049). `afe/ns_engine` gieo 0 tới khi `wake` học
+(§10.10), nên bản dựng S3 mang GTCRN (`sdkconfig.defaults.esp32s3`, ADR-0049). Board C không mang mạng nào
+(`sdkconfig.board_c` chọn `none`): chuỗi `MR` của nó có tham chiếu loa nên khe chạy sàn theo luật echo, và trọng số cùng
+trạng thái của GTCRN, ~255 KB PSRAM, để board C còn 62 KB sau camera và `detect`, console và bắt tay Wi-Fi không cấp phát
+được (`measurements/board_c.md` §8). `afe/ns_engine` gieo 0 tới khi `wake` học
 lại trên chuỗi có GTCRN (split `wake/vung1_gtcrn`) thắng bản đang dùng trên phiên board; khi ấy `ns.engine` của
 `contracts/afe.yaml` thành 1 cùng lúc với deploy bản ấy, sau khi `command` được chấm trên cùng chuỗi.
 
@@ -3732,8 +3735,8 @@ Board một micro (§2.3) là một lớp chồng lên profile, không phải pr
 thêm `sdkconfig.mic1` vào cuối danh sách defaults và dựng trong `build_bench_mic1`, để hai bản không dùng chung
 `sdkconfig`. `BOARD=C` làm y như vậy với `sdkconfig.board_c` và `build_bench_c`. `NS=gtcrn` hay `NS=ulunas` của `fw-bench` và `product`
 đặt `AI_ENGINE_NS_BACKEND` bằng một lớp `make` viết vào thư mục dựng riêng của nó (`…_ns<mạng>`). Không có `NS`, bản dựng mang
-mạng mà `sdkconfig.defaults.<chip>` chọn, `gtcrn` ở S3 (§3.9); `make` đọc tên mạng từ chính dòng ấy, và ảnh model mang hàng
-`ns_<mạng>` của khoá (§6.3). `prod` không có luồng tiếng thô: một máy đặt trong phòng không được có đường
+mạng mà `sdkconfig.defaults.<chip>` chọn, `gtcrn` ở S3 (§3.9), trừ khi lớp của board chọn khác (`none` ở `BOARD=C`); `make`
+đọc tên mạng từ dòng cuối trong các file ấy, và ảnh model mang hàng `ns_<mạng>` của khoá (§6.3). `prod` không có luồng tiếng thô: một máy đặt trong phòng không được có đường
 đẩy tiếng người ra ngoài chỉ vì ai đó quên tắt (§7.5).
 
 Chung cả bốn (`sdkconfig.defaults.esp32s3`):

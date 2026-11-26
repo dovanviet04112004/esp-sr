@@ -675,3 +675,23 @@ Code và test giữ nguyên.
 
 Giá của chúng là `detect`. UART, I2C và ngắt GPIO ăn ~1 KB RAM nội nhưng khối liền lớn nhất mất 2 KB, vùng mượn của `detect` từ 26 560 xuống 24 512 / 32 768 B, và
 một lượt từ 1 921–1 947 ms lên **2 007–2 016 ms**, 5 lần. Tắt đi thì vùng mượn về 26 560 B và một lượt về 1 944 ms. Bật lại thì phải lấy lại chừng ấy RAM nội trước.
+
+## 8. Bản dựng mang GTCRN làm board C hết PSRAM (E9-T16, 26/11)
+
+`make product BOARD=C` sau ADR-0049, khi `sdkconfig.defaults.esp32s3` chọn GTCRN cho mọi bản S3 và ảnh model mang hàng
+`ns_gtcrn` (99 520 B trọng số) cùng trạng thái 152 620 B của mạng ở PSRAM. Log khởi động (dây và hotspot `esp` như hôm trước):
+
+| Bước của `app_boot` | PSRAM trống |
+|---|---|
+| sau `models` | 4 453 152 B |
+| sau `detect` | 1 092 440 B |
+| sau `camera` | 697 956 B |
+| sau `vision` | 66 456 B |
+| sau `sensors` | 62 604 B |
+
+- `E app_main: console: ESP_ERR_NO_MEM`: console không khởi, board không nhận lệnh nào qua UART, kể cả `restart`.
+- Wi-Fi đặt bộ đệm ở PSRAM (`SPIRAM_TRY_ALLOCATE_WIFI_LWIP`): mỗi lần nối `auth → assoc → run` rồi 3 s sau rớt với
+  `reason 15`, bắt tay WPA2 không xong; broker không thấy board.
+- Chuỗi của board C là `MR` (một micro, tham chiếu loa): khe `ns` chạy sàn theo luật echo, nên mạng không bao giờ chạy ở đây.
+- Sửa: `sdkconfig.board_c` chọn `AI_ENGINE_NS_BACKEND_NONE`, và `make` đọc mạng từ dòng cuối của các file defaults cộng lớp
+  board, nên ảnh model của board C không có hàng `ns_*` (KẾ HOẠCH §3.9, §4.5.8).
