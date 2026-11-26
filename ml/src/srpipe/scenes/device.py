@@ -217,17 +217,19 @@ def diffuse_pair(u: np.ndarray, v: np.ndarray) -> np.ndarray:
 
 def with_ns_engine(chain_cfg: ChainConfig) -> ChainConfig:
     """chain_cfg with the ns slot of the engine SRPIPE_NS names in place of the floor, unchanged without one or with a
-    slot of its own (KEHOACH 3.9)."""
+    slot of its own: GTCRN as the chip runs it, by its mirror on the locked blob; UL-UNAS by StreamULUNAS (KEHOACH
+    3.9)."""
     name = ns_engine()
     if name is None or chain_cfg.ns_slot is not None:
         return chain_cfg
-    # Imported here: tasks.ns builds on the board simulation that imports this module.
-    from srpipe.tasks.ns import gtcrn, ulunas
-
-    makers = {"gtcrn": gtcrn.slot_factory, "ulunas": ulunas.slot_factory}
-    if name not in makers:
-        raise SystemExit(f"{NS_ENV}={name}: the Python chain's ns slot knows {sorted(makers)}")
-    return replace(chain_cfg, ns_slot=makers[name]())
+    # Imported here: tasks.ns builds on the board simulation that imports this module, and only ulunas needs torch.
+    if name == "gtcrn":
+        from srpipe.tasks.ns.gtcrn_mirror import slot_factory
+    elif name == "ulunas":
+        from srpipe.tasks.ns.ulunas import slot_factory
+    else:
+        raise SystemExit(f"{NS_ENV}={name}: the Python chain's ns slot knows ['gtcrn', 'ulunas']")
+    return replace(chain_cfg, ns_slot=slot_factory())
 
 
 def listen(
