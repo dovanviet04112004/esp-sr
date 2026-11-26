@@ -959,8 +959,11 @@ xác nhận. ADR ghi bảng ba cột, và bản được giữ thành mặc đ�
 **Ứng viên học sẵn: GTCRN và UL-UNAS** (E9-T15, E9-T16, E9-T19, E9-T20, §3.16, ADR-0047, ADR-0048). Chuỗi Python nhận một khe `ns` từ ngoài
 (`ChainConfig.ns_slot`): mỗi bước khe nhận phổ phức 257 vạch của lối ra không gian và trả một gain ≤ 1 mỗi vạch, thay
 sàn như khe của firmware. `SRPIPE_NS=gtcrn` trên môi trường của lệnh, không ở `.env`, như `SRPIPE_CHIP`, cắm GTCRN chạy
-dòng vào mọi chuỗi mà `device.listen` dựng (`tasks/ns/gtcrn.py`): các file chạy dòng ở commit ghim, nạp checkpoint DNS3
-chính thức; gain là tỉ số biên độ giữa lối ra của mạng và vạch vào. `wake-board` và `command-eval` nhờ thế chấm cùng phiên
+dòng vào mọi chuỗi mà `device.listen` dựng, đúng như chip chạy: bản soi gương `tasks/ns/gtcrn_mirror.py` trên blob
+`ns_gtcrn` mà khoá giữ, kiểm sha256 lúc nạp, nên phải `make ns-gtcrn-deploy` trước. Worker không nạp torch, ~6,5 ms một
+bước so với 9,3 ms của StreamGTCRN, và nhẹ hơn ~0,5 GB (`ns.md` §10.11). StreamGTCRN của PyTorch ở `tasks/ns/gtcrn.py`
+(các file ở commit ghim, checkpoint DNS3 chính thức) chỉ còn để deploy kiểm bản soi gương trong `deploy.gain_atol`.
+`ulunas` vẫn chạy StreamULUNAS. `wake-board` và `command-eval` nhờ thế chấm cùng phiên
 board, một lần với sàn và một lần với GTCRN, bằng thước của §3.15. Bản dựng ở `processed/` chạy với `SRPIPE_NS` ghi động
 cơ ấy vào `build.yaml` và manifest, và chỉ được coi là đã dựng cho đúng động cơ ấy; bản không ghi là của sàn. Phiên bản
 split dựng cho một động cơ mang tên động cơ, file split chép nguyên từ phiên bản gốc (`wake/vung1_gtcrn` của
