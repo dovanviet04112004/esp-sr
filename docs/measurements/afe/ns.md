@@ -764,3 +764,19 @@ Bản C sau §10.9 (GTCRN 11,4 ms một bước với trạng thái ở PSRAM), 
 - `cleanDropped`, `eventsDropped`, `streamDropped`, `dmaOverflows` 0 suốt lượt; PSRAM trống giữ 3 961 732 B.
 - Chưa đo trên board C (chuỗi `MR` có `aec`, phần còn lại của chuỗi ~3,7 ms theo §10.4) 🔬.
 - Board B trả về bản không `NS`, khoá trả về hàng UL-UNAS đã commit.
+
+### 10.11 GTCRN của chuỗi Python: bản soi gương trên blob khoá thay StreamGTCRN (26/11, E11-T61)
+
+Dựng đặc trưng `wake` qua chuỗi có GTCRN (`SRPIPE_NS=gtcrn`, split `wake/vung1_gtcrn`) trên máy tính, 20 luồng, 9,9 GB RAM:
+
+| Khe GTCRN của chuỗi | Một bước, một luồng, máy đang chạy bản dựng | RAM một worker | Worker vừa RAM | Shard `val_neg` mỗi phút |
+|---|---|---|---|---|
+| StreamGTCRN của PyTorch | 9,33 ms | ~1 GB | 7 | 0,30 |
+| bản soi gương trên blob `ns_gtcrn` | 6,54 ms | ~430 MB | 10 | 0,55 |
+
+Từ 09:51 bản dựng chạy 12 worker trên bản soi gương; số shard mỗi phút ghi ở `wake.md` khi đặc trưng xong.
+
+- Bản soi gương đọc ngược blob mà khoá giữ (`gtcrn_mirror.unpack`, kiểm sha256): khớp từng bit bản dựng thẳng từ checkpoint,
+  lệch StreamGTCRN tối đa 2,9·10⁻⁶ qua 60 bước; worker không nạp torch.
+- Shard đã dựng bằng StreamGTCRN (`val_hard`, `val_pos`, `train_hard`, `train_pos`, 14 shard đầu của `val_neg`) giữ nguyên:
+  lệch 2,9·10⁻⁶ của gain nhỏ hơn nhiều so với bước float16 mà đặc trưng học được lưu.
